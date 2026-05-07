@@ -86,10 +86,10 @@ def _perf_stats(series: pd.Series) -> tuple[float, float, float]:
     return ann_ret, ann_vol, cum_ret
 
 
-def _sharpe(ann_ret: float, ann_vol: float, rfr: float) -> str:
+def _sharpe(ann_ret: float, ann_vol: float, rfr: float) -> float:
     if ann_vol == 0:
-        return "N/A"
-    return f"{(ann_ret - rfr) / ann_vol:.3f}"
+        return float("nan")
+    return round((ann_ret - rfr) / ann_vol, 3)
 
 
 def _calc_portfolio_returns(
@@ -118,8 +118,8 @@ def _calc_risk_metrics(series: pd.Series, bench: pd.Series, L: dict) -> dict:
     ir = (excess.mean() / excess.std() * np.sqrt(12)) if excess.std() > 0 else float("nan")
     return {
         L["col_beta"]:  round(beta, 3),
-        L["col_var"]:   f"{var_95*100:.2f}%",
-        L["col_cvar"]:  f"{cvar_95*100:.2f}%",
+        L["col_var"]:   round(var_95, 4),
+        L["col_cvar"]:  round(cvar_95, 4),
         L["col_ir"]:    round(ir, 3),
     }
 
@@ -280,12 +280,12 @@ def run_analysis(
     pr = _perf_stats(portfolio_returns)
     rows.append([portfolio_name,
                  _sharpe(pr[0], pr[1], risk_free_rate),
-                 f"{pr[0]*100:.2f}%", f"{pr[1]*100:.2f}%", f"{pr[2]*100:.2f}%"])
+                 pr[0], pr[1], pr[2]])
     for sym in bench_tickers:
         br = _perf_stats(bench_returns[sym].reindex(_pf_idx).dropna())
         rows.append([benchmark_labels[sym],
                      _sharpe(br[0], br[1], risk_free_rate),
-                     f"{br[0]*100:.2f}%", f"{br[1]*100:.2f}%", f"{br[2]*100:.2f}%"])
+                     br[0], br[1], br[2]])
 
     comparison_df = pd.DataFrame(
         rows,

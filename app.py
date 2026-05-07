@@ -359,7 +359,22 @@ def _results():
         except Exception as e: st.warning(str(e))
 
     st.divider(); _sec("section_performance","desc_performance")
-    st.dataframe(res.comparison_df,use_container_width=True,hide_index=True)
+    _pct = st.column_config.NumberColumn(format="%.2f%%")
+    st.dataframe(
+        res.comparison_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            L["col_sharpe"]:     st.column_config.NumberColumn(format="%.3f"),
+            L["col_ann_return"]: _pct,
+            L["col_ann_risk"]:   _pct,
+            L["col_cum_return"]: _pct,
+            L["col_var"]:        _pct,
+            L["col_cvar"]:       _pct,
+            L["col_beta"]:       st.column_config.NumberColumn(format="%.3f"),
+            L["col_ir"]:         st.column_config.NumberColumn(format="%.3f"),
+        },
+    )
     xlsx_b=build_analysis_xlsx(res,L); res_b=build_resolved_xlsx(res.confirmed_df)
     st.download_button(_T("download_xlsx"),xlsx_b,"analysis_results.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="xl")
