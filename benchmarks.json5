@@ -1,0 +1,217 @@
+{
+  // デフォルト（対応国がない場合）
+  // base_currency: USD 基準
+  // fx_tickers: 各外貨 → USD への Yahoo Finance 為替ティッカー
+  "DEFAULT": {
+    "base_currency": "USD",
+    "fx_tickers": {
+      "JPY": "JPY=X",
+      "GBP": "GBPUSD=X",
+      "EUR": "EURUSD=X",
+      "HKD": "HKDUSD=X",
+      "CNY": "CNYUSD=X",
+      "INR": "INRUSD=X"
+    },
+    "benchmarks": [
+      {
+        "name": "S&P 500",
+        "symbol": "^GSPC",
+        "priority": 1,
+        "type": "index",
+        "note": "US large-cap market benchmark"
+      }
+    ]
+  },
+
+  // =========================
+  // Japan
+  // =========================
+  "JP": {
+    "base_currency": "JPY",
+    "fx_tickers": {
+      "USD": "JPY=X",
+      "GBP": "GBPJPY=X",
+      "EUR": "EURJPY=X",
+      "HKD": "HKDJPY=X",
+      "CNY": "CNYJPY=X",
+      "INR": "INRJPY=X"
+    },
+    "benchmarks": [
+      {
+        "name": "Nikkei 225",
+        "symbol": "^N225",
+        "priority": 1,
+        "type": "index",
+        "note": "Price-weighted, preferred in this app"
+      },
+      {
+        "name": "TOPIX",
+        "symbol": "1306.T",
+        "priority": 2,
+        "type": "etf",
+        "note": "Market-cap weighted"
+      }
+    ]
+  },
+
+  // =========================
+  // United States
+  // =========================
+  "US": {
+    "base_currency": "USD",
+    "fx_tickers": {
+      "JPY": "JPY=X",
+      "GBP": "GBPUSD=X",
+      "EUR": "EURUSD=X",
+      "HKD": "HKDUSD=X",
+      "CNY": "CNYUSD=X",
+      "INR": "INRUSD=X"
+    },
+    "benchmarks": [
+      {
+        "name": "S&P 500",
+        "symbol": "^GSPC",
+        "priority": 1,
+        "type": "index"
+      },
+      {
+        "name": "NASDAQ 100",
+        "symbol": "^NDX",
+        "priority": 2,
+        "type": "index"
+      },
+      {
+        "name": "Dow Jones Industrial Average",
+        "symbol": "^DJI",
+        "priority": 3,
+        "type": "index"
+      }
+    ]
+  },
+
+  // =========================
+  // Europe
+  // =========================
+  "GB": {
+    "base_currency": "GBP",
+    "fx_tickers": {
+      "USD": "USDGBP=X",
+      "JPY": "JPYGBP=X",
+      "EUR": "EURGBP=X",
+      "HKD": "HKDGBP=X",
+      "CNY": "CNYGBP=X",
+      "INR": "INRGBP=X"
+    },
+    "benchmarks": [
+      {
+        "name": "FTSE 100",
+        "symbol": "^FTSE",
+        "priority": 1,
+        "type": "index"
+      }
+    ]
+  },
+
+  "DE": {
+    "base_currency": "EUR",
+    "fx_tickers": {
+      "USD": "USDEUR=X",
+      "JPY": "JPYEUR=X",
+      "GBP": "GBPEUR=X",
+      "HKD": "HKDEUR=X",
+      "CNY": "CNYEUR=X",
+      "INR": "INREUR=X"
+    },
+    "benchmarks": [
+      {
+        "name": "DAX",
+        "symbol": "^GDAXI",
+        "priority": 1,
+        "type": "index"
+      }
+    ]
+  },
+
+  "FR": {
+    "base_currency": "EUR",
+    "fx_tickers": {
+      "USD": "USDEUR=X",
+      "JPY": "JPYEUR=X",
+      "GBP": "GBPEUR=X",
+      "HKD": "HKDEUR=X",
+      "CNY": "CNYEUR=X",
+      "INR": "INREUR=X"
+    },
+    "benchmarks": [
+      {
+        "name": "CAC 40",
+        "symbol": "^FCHI",
+        "priority": 1,
+        "type": "index"
+      }
+    ]
+  },
+
+  // =========================
+  // Asia
+  // =========================
+  "CN": {
+    "base_currency": "CNY",
+    "fx_tickers": {
+      "USD": "USDCNY=X",
+      "JPY": "JPYCNY=X",
+      "GBP": "GBPCNY=X",
+      "EUR": "EURCNY=X",
+      "HKD": "HKDCNY=X",
+      "INR": "INRCNY=X"
+    },
+    "benchmarks": [
+      {
+        "name": "CSI 300",
+        "symbol": "000300.SS",
+        "priority": 1,
+        "type": "index"
+      }
+    ]
+  },
+
+  "HK": {
+    "base_currency": "HKD",
+    "fx_tickers": {
+      "USD": "USDHKD=X",
+      "JPY": "JPYHKD=X",
+      "GBP": "GBPHKD=X",
+      "EUR": "EURHKD=X",
+      "CNY": "CNYHKD=X",
+      "INR": "INRHKD=X"
+    },
+    "benchmarks": [
+      {
+        "name": "Hang Seng Index",
+        "symbol": "^HSI",
+        "priority": 1,
+        "type": "index"
+      }
+    ]
+  },
+
+  "IN": {
+    "base_currency": "INR",
+    "fx_tickers": {
+      "USD": "USDINR=X",
+      "JPY": "JPYINR=X",
+      "GBP": "GBPINR=X",
+      "EUR": "EURINR=X",
+      "HKD": "HKDINR=X",
+      "CNY": "CNYINR=X"
+    },
+    "benchmarks": [
+      {
+        "name": "NIFTY 50",
+        "symbol": "^NSEI",
+        "priority": 1,
+        "type": "index"
+      }
+    ]
+  }
+}

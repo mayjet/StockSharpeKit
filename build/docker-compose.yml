@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: build/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      # 分析結果をホストに保存したい場合はコメントを外す
+      # - ../portfolios:/app/portfolios
+    restart: unless-stopped
