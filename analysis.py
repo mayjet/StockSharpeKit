@@ -86,6 +86,12 @@ def _perf_stats(series: pd.Series) -> tuple[float, float, float]:
     return ann_ret, ann_vol, cum_ret
 
 
+def _sharpe(ann_ret: float, ann_vol: float, rfr: float) -> str:
+    if ann_vol == 0:
+        return "N/A"
+    return f"{(ann_ret - rfr) / ann_vol:.3f}"
+
+
 def _calc_portfolio_returns(
     returns_df: pd.DataFrame, weights: pd.Series
 ) -> pd.Series:
@@ -201,9 +207,15 @@ def run_analysis(
             continue
         src_ccy  = _country_to_currency.get(row.values[0])
         if src_ccy and src_ccy != _base_currency:
-            fx_ticker = _fx_tickers_map.get(src_ccy)
-            if not fx_ticker:
+            fx_entry = _fx_tickers_map.get(src_ccy)
+            if not fx_entry:
                 continue
+            if isinstance(fx_entry, dict):
+                fx_ticker = fx_entry["ticker"]
+                fx_invert = fx_entry.get("invert", False)
+            else:
+                fx_ticker = fx_entry
+                fx_invert = False
             if fx_ticker not in _fx_cache:
                 fx_raw = yf.download(
                     fx_ticker, start=start_date, end=end_date,
@@ -214,7 +226,8 @@ def run_analysis(
                 else:
                     fx_s = fx_raw.squeeze()
                 _fx_cache[fx_ticker] = fx_s.reindex(prices.index, method="ffill")
-            prices[t] = prices[t] * _fx_cache[fx_ticker]
+            fx_rate = _fx_cache[fx_ticker]
+            prices[t] = prices[t] / fx_rate if fx_invert else prices[t] * fx_rate
 
     # ── Step 3: Short-term check ──────────────────────────────────────────
     _progress(L.get("step_shortterm", "Checking short-term assets..."))
@@ -241,8 +254,11 @@ def run_analysis(
     mu = expected_returns.mean_historical_return(
         prices[fund_tickers], frequency=12, compounding=False
     )
+    _returns_for_cov = fund_returns.dropna()
+    if len(_returns_for_cov) < max(12, len(fund_tickers) + 1):
+        _returns_for_cov = fund_returns.fillna(0)
     S = risk_models.CovarianceShrinkage(
-        fund_returns.fillna(0), returns_data=True, frequency=12
+        _returns_for_cov, returns_data=True, frequency=12
     ).ledoit_wolf()
 
     ef = EfficientFrontier(mu, S)
@@ -259,26 +275,33 @@ def run_analysis(
     _progress(L.get("step_risk", "Computing risk metrics..."))
     _primary_bench = bench_tickers[0] if bench_tickers else None
 
+    _pf_idx = portfolio_returns.index
     rows: list[list] = []
     pr = _perf_stats(portfolio_returns)
     rows.append([portfolio_name,
+                 _sharpe(pr[0], pr[1], risk_free_rate),
                  f"{pr[0]*100:.2f}%", f"{pr[1]*100:.2f}%", f"{pr[2]*100:.2f}%"])
     for sym in bench_tickers:
-        br = _perf_stats(bench_returns[sym].dropna())
+        br = _perf_stats(bench_returns[sym].reindex(_pf_idx).dropna())
         rows.append([benchmark_labels[sym],
+                     _sharpe(br[0], br[1], risk_free_rate),
                      f"{br[0]*100:.2f}%", f"{br[1]*100:.2f}%", f"{br[2]*100:.2f}%"])
 
     comparison_df = pd.DataFrame(
         rows,
-        columns=[L["col_portfolio"], L["col_ann_return"], L["col_ann_risk"], L["col_cum_return"]]
+        columns=[L["col_portfolio"], L["col_sharpe"],
+                 L["col_ann_return"], L["col_ann_risk"], L["col_cum_return"]]
     )
 
     if _primary_bench:
-        pm = _calc_risk_metrics(portfolio_returns, bench_returns[_primary_bench], L)
+        _bench_clipped = bench_returns[_primary_bench].reindex(_pf_idx).dropna()
+        pm = _calc_risk_metrics(portfolio_returns, _bench_clipped, L)
         for col, val in pm.items():
             comparison_df.loc[comparison_df[L["col_portfolio"]] == portfolio_name, col] = val
         for sym in bench_tickers:
-            bm = _calc_risk_metrics(bench_returns[sym].dropna(), bench_returns[_primary_bench].dropna(), L)
+            bm = _calc_risk_metrics(
+                bench_returns[sym].reindex(_pf_idx).dropna(), _bench_clipped, L
+            )
             for col, val in bm.items():
                 comparison_df.loc[comparison_df[L["col_portfolio"]] == benchmark_labels[sym], col] = val
 

@@ -329,7 +329,7 @@ def _yahoo_jp_fetch_monthly(ticker: str, start: str, end: str) -> "pd.Series":
         return pd.Series(dtype=float)
 
     import pandas as pd
-    return pd.Series(daily).sort_index().resample("ME").last()
+    return pd.Series(daily).sort_index().resample("MS").last()
 
 
 @st.cache_data(ttl=300, show_spinner=False)

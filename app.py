@@ -70,7 +70,7 @@ def _init():
     # 旧セッションで start_date が None のまま残っている場合の救済
     if st.session_state.start_date is None:
         st.session_state.start_date = _sd_default
-    if st.session_state.end_date > today:
+    if st.session_state.end_date is None or st.session_state.end_date > today:
         st.session_state.end_date = today
 
 
