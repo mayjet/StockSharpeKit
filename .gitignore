@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# 実行時出力（分析結果）
+portfolios/
+MyPortfolio_*/
+input.json
+output.json
+analysis_results.xlsx
+resolved_symbols.xlsx
+
+# 個人ファイル
+*.pdf
