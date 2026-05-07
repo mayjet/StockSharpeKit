@@ -66,6 +66,8 @@ _L: dict[str, dict[str, str]] = {
             "ポートフォリオと市場指数の成績を比較します。"
             "ベータが1未満なら市場全体より値動きが小さく、"
             "情報比率が高いほどベンチマーク超過リターンの安定性が高いことを示します。"
+            "※上部の「期待年率リターン／シャープレシオ」は最適化の理論推定値です。"
+            "この表の値は実際の月次リターン系列から計算した実績値のため、数値が異なります。"
         ),
         "section_cum_bar":  "累積リターン比較",
         "desc_cum_bar":     "分析期間全体の合計リターンを棒グラフで比較します。",
@@ -85,6 +87,7 @@ _L: dict[str, dict[str, str]] = {
         "desc_drawdown":    "過去のピークからの下落率を時系列で示します。深いほど大きな損失局面です。",
         # ── DataFrame columns ──────────────────────────────────────────────
         "col_portfolio":   "ポートフォリオ/指数",
+        "col_sharpe":      "シャープレシオ",
         "col_ann_return":  "年率平均リターン",
         "col_ann_risk":    "年率リスク",
         "col_cum_return":  "累積リターン",
@@ -198,7 +201,9 @@ _L: dict[str, dict[str, str]] = {
         "desc_performance": (
             "Compares your portfolio against market benchmarks. "
             "Beta below 1 means lower market sensitivity. "
-            "A higher Info Ratio means more consistent outperformance."
+            "A higher Info Ratio means more consistent outperformance. "
+            "* The Expected Return / Sharpe Ratio shown above are optimizer estimates (theoretical). "
+            "Values in this table are realized figures computed from actual monthly returns."
         ),
         "section_cum_bar":  "Cumulative Return Comparison",
         "desc_cum_bar":     "Total return over the full analysis period, shown as a bar chart.",
@@ -217,6 +222,7 @@ _L: dict[str, dict[str, str]] = {
         "section_drawdown": "Drawdown",
         "desc_drawdown":    "Percentage decline from the prior peak at each point in time. Deeper = larger loss.",
         "col_portfolio":   "Portfolio/Index",
+        "col_sharpe":      "Sharpe Ratio",
         "col_ann_return":  "Annual Return",
         "col_ann_risk":    "Annual Risk",
         "col_cum_return":  "Cumulative Return",

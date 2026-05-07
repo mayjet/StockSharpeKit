@@ -5,7 +5,7 @@
   "DEFAULT": {
     "base_currency": "USD",
     "fx_tickers": {
-      "JPY": "JPY=X",
+      "JPY": { "ticker": "JPY=X", "invert": true },
       "GBP": "GBPUSD=X",
       "EUR": "EURUSD=X",
       "HKD": "HKDUSD=X",
@@ -60,7 +60,7 @@
   "US": {
     "base_currency": "USD",
     "fx_tickers": {
-      "JPY": "JPY=X",
+      "JPY": { "ticker": "JPY=X", "invert": true },
       "GBP": "GBPUSD=X",
       "EUR": "EURUSD=X",
       "HKD": "HKDUSD=X",
@@ -96,7 +96,7 @@
     "base_currency": "GBP",
     "fx_tickers": {
       "USD": "USDGBP=X",
-      "JPY": "JPYGBP=X",
+      "JPY": { "ticker": "GBPJPY=X", "invert": true },
       "EUR": "EURGBP=X",
       "HKD": "HKDGBP=X",
       "CNY": "CNYGBP=X",
@@ -116,7 +116,7 @@
     "base_currency": "EUR",
     "fx_tickers": {
       "USD": "USDEUR=X",
-      "JPY": "JPYEUR=X",
+      "JPY": { "ticker": "EURJPY=X", "invert": true },
       "GBP": "GBPEUR=X",
       "HKD": "HKDEUR=X",
       "CNY": "CNYEUR=X",
@@ -136,7 +136,7 @@
     "base_currency": "EUR",
     "fx_tickers": {
       "USD": "USDEUR=X",
-      "JPY": "JPYEUR=X",
+      "JPY": { "ticker": "EURJPY=X", "invert": true },
       "GBP": "GBPEUR=X",
       "HKD": "HKDEUR=X",
       "CNY": "CNYEUR=X",
@@ -159,7 +159,7 @@
     "base_currency": "CNY",
     "fx_tickers": {
       "USD": "USDCNY=X",
-      "JPY": "JPYCNY=X",
+      "JPY": { "ticker": "CNYJPY=X", "invert": true },
       "GBP": "GBPCNY=X",
       "EUR": "EURCNY=X",
       "HKD": "HKDCNY=X",
@@ -179,7 +179,7 @@
     "base_currency": "HKD",
     "fx_tickers": {
       "USD": "USDHKD=X",
-      "JPY": "JPYHKD=X",
+      "JPY": { "ticker": "HKDJPY=X", "invert": true },
       "GBP": "GBPHKD=X",
       "EUR": "EURHKD=X",
       "CNY": "CNYHKD=X",
@@ -199,7 +199,7 @@
     "base_currency": "INR",
     "fx_tickers": {
       "USD": "USDINR=X",
-      "JPY": "JPYINR=X",
+      "JPY": { "ticker": "INRJPY=X", "invert": true },
       "GBP": "GBPINR=X",
       "EUR": "EURINR=X",
       "HKD": "HKDINR=X",
