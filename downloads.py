@@ -43,9 +43,26 @@ def build_analysis_xlsx(result: AnalysisResult, L: dict) -> bytes:
         ws_res.append(list(row))
     ws_res.append([])
     ws_res.append([L["excel_perf_title"], ""])
-    ws_res.append(result.comparison_df.columns.tolist())
+    comp_header = result.comparison_df.columns.tolist()
+    ws_res.append(comp_header)
+    _comp_data_start = ws_res.max_row + 1
     for _, row in result.comparison_df.iterrows():
         ws_res.append(list(row))
+
+    # セル書式: 数値列に Excel フォーマットを適用
+    _PCT_COLS = {L.get(k) for k in (
+        "col_ann_return", "col_ann_risk", "col_cum_return", "col_var", "col_cvar"
+    )}
+    _NUM_COLS = {L.get(k) for k in ("col_sharpe", "col_beta", "col_ir")}
+    for ci, col_name in enumerate(comp_header, start=1):
+        fmt = None
+        if col_name in _PCT_COLS:
+            fmt = "0.00%"
+        elif col_name in _NUM_COLS:
+            fmt = "0.000"
+        if fmt:
+            for ri in range(_comp_data_start, _comp_data_start + len(result.comparison_df)):
+                ws_res.cell(row=ri, column=ci).number_format = fmt
 
     buf = io.BytesIO()
     wb.save(buf)
