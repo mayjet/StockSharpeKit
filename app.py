@@ -359,8 +359,8 @@ def _results():
         except Exception as e: st.warning(str(e))
 
     st.divider(); _sec("section_performance","desc_performance")
-    _pct = st.column_config.NumberColumn(format=".2%")
-    _num = st.column_config.NumberColumn(format=".3f")
+    _pct = st.column_config.NumberColumn(format="percent")
+    _num = st.column_config.NumberColumn(format="%.3f")
     st.dataframe(
         res.comparison_df,
         use_container_width=True,
