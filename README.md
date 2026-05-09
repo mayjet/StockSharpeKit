@@ -123,7 +123,3 @@ Notebook 実行時に読み込む銘柄コードのリスト。1行につき1コ
 | `portfolios/<name>_<datetime>/` | 上記を含む自動保存フォルダ |
 
 ---
-
-## ライセンス
-
-本リポジトリのライセンスについては [LICENSE](.claude/worktrees/crazy-raman-ebb30c/LICENSE) ファイルを参照してください。
