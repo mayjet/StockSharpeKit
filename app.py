@@ -22,7 +22,7 @@ from downloads import (
 from cloud_backup import upload_to_drive_async
 
 st.set_page_config(
-    page_title="Max Sharpe Portfolio Analyzer",
+    page_title="Max Sharpe Portfolio Analyzer for Stock League",
     page_icon="📈",
     layout="wide",
 )
@@ -156,7 +156,7 @@ def _inject_date_js():
 
 def _top_bar():
     c1, c2 = st.columns([6, 1])
-    c1.markdown("## Max Sharpe Portfolio Analyzer")
+    c1.markdown("## 📈 Max Sharpe Portfolio Analyzer for Stock League")
     with c2:
         _opts   = ["JP", "EN"]
         _labels = {"JP": "日本語", "EN": "English"}
@@ -171,6 +171,7 @@ def _top_bar():
         if sel != st.session_state.lang:
             st.session_state.lang = sel
             st.rerun()
+    st.info(_T("app_notice"), icon="ℹ️")
     st.divider()
 
 

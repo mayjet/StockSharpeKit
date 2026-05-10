@@ -6,10 +6,14 @@ All UI text is defined here. Use get_text(key, lang) to translate.
 _L: dict[str, dict[str, str]] = {
     "JP": {
         # ── App ────────────────────────────────────────────────────────────
+        "app_notice": (
+            "本アプリは **日経ストックリーグ** 向けのポートフォリオ分析ツールです。"
+            "過去の株価データをもとに最適配分を計算し、**分析結果・データの提供のみ**を目的としています。"
+            "投資の利益を確実に保証するものではありません。"
+        ),
         "app_description": (
             "候補銘柄を入力すると、**シャープレシオ（リターン÷リスク）が最大**になる"
-            "配分比率を自動計算します。最適化は過去の株価データに基づくバックテストであり、"
-            "将来の利益を保証するものではありません。"
+            "配分比率を自動計算します。"
         ),
         # ── Basic settings ─────────────────────────────────────────────────
         "label_portfolio_name": "ポートフォリオ名",
@@ -147,10 +151,14 @@ _L: dict[str, dict[str, str]] = {
     },
     # ─────────────────────────────────────────────────────────────────────
     "EN": {
+        "app_notice": (
+            "This tool is designed for **Nikkei Stock League** portfolio analysis. "
+            "It calculates optimal allocations based on historical data and is intended solely "
+            "to **provide analysis and data** — it does not guarantee investment returns."
+        ),
         "app_description": (
             "Enter your candidate stocks and this tool automatically calculates the allocation "
-            "that **maximizes the Sharpe ratio** (return per unit of risk). "
-            "Optimization is based on historical data and does not guarantee future returns."
+            "that **maximizes the Sharpe ratio** (return per unit of risk)."
         ),
         "label_portfolio_name": "Portfolio Name",
         "label_period":         "Analysis Period",
