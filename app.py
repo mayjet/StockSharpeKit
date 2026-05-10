@@ -19,6 +19,7 @@ from downloads import (
     build_analysis_xlsx, build_resolved_xlsx,
     build_output_json, build_zip,
 )
+from cloud_backup import upload_to_drive_async
 
 st.set_page_config(
     page_title="Max Sharpe Portfolio Analyzer",
@@ -297,6 +298,7 @@ def _autosave(res, L: dict, chart_bytes: dict) -> None:
     for fname, data in chart_bytes.items():
         if data:
             (out_dir / fname).write_bytes(data)
+    upload_to_drive_async(out_dir)
 
 
 def _analyse():
