@@ -14,6 +14,7 @@ Improvements over previous version:
 from __future__ import annotations
 
 import re
+import sys
 import time
 import requests
 import streamlit as st
@@ -242,10 +243,34 @@ def search_suggestions(query: str, preferred_country: str, count: int = 20) -> l
             if hit:
                 prioritized = _merge(prioritized, [hit])
 
+    # 6. 汎用フォールバック — yfinance 直接検索（全国対応）
+    #    上記すべてで preferred_country の候補が見つからない場合に試みる
+    if not any(c["country"] == preferred_country for c in prioritized):
+        base6 = bare if bare != query else query
+        already = {c["symbol"] for c in prioritized}
+        to_try: list[str] = []
+        for suffix in _COUNTRY_SUFFIXES.get(preferred_country, []):
+            candidate = base6 + suffix
+            if candidate not in already:
+                to_try.append(candidate)
+        if "." not in base6:
+            to_try.append(base6)
+
+        for sym in to_try:
+            hit = _yf_direct_lookup(sym)
+            if hit:
+                country = (_EXCH_TO_COUNTRY.get(hit["exchange"])
+                           or _infer_country_from_symbol(sym) or "")
+                hit["country"] = country
+                hit["score"] = 0 if country == preferred_country else 10
+                prioritized = _merge(prioritized, [hit])
+                if any(c["country"] == preferred_country for c in prioritized):
+                    break
+
     return prioritized[:8]
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def _yahoo_jp_lookup(code: str) -> dict | None:
     """finance.yahoo.co.jp の HTML で JP 株を検証し候補 dict を返す。"""
     base   = re.sub(r"\.[A-Za-z]+$", "", code)
@@ -258,12 +283,23 @@ def _yahoo_jp_lookup(code: str) -> dict | None:
         )
         if r.status_code != 200:
             return None
-        m = re.search(r"<title>(.+?)【", r.text)
-        if not m:
-            return None
-        name = m.group(1).strip()
+        # 複数パターンで銘柄名を抽出（サイト側の形式変更に対応）
+        name = None
+        for pattern in [
+            r"<title>(.+?)【",           # 旧形式: "銘柄名【7817.T】..."
+            r"<title>(.+?)\s*[-|｜]",   # 新形式: "銘柄名 - Yahoo ファイナンス"
+            r"<title>(.+?)[\s（(]",      # 括弧形式
+        ]:
+            m = re.search(pattern, r.text)
+            if m and m.group(1).strip():
+                name = m.group(1).strip()
+                break
+        # 名前が取れなくても 200 が返れば ticker を候補として返す
+        if name is None:
+            name = ticker
         return {"symbol": ticker, "name": name, "exchange": "JPX", "country": "JP", "score": 0}
-    except Exception:
+    except Exception as e:
+        print(f"[symbol_resolver] _yahoo_jp_lookup({ticker}) 失敗: {e}", file=sys.stderr)
         return None
 
 
