@@ -14,5 +14,12 @@ output.json
 analysis_results.xlsx
 resolved_symbols.xlsx
 
+# Streamlit secrets（認証情報 — 絶対にコミットしない）
+.streamlit/secrets.toml
+
+# サービスアカウント・OAuthキー（認証情報 — 絶対にコミットしない）
+*.json
+get_gdrive_token.py
+
 # 個人ファイル
 *.pdf
