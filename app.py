@@ -65,6 +65,8 @@ def _init():
         user_country="JP", mdd_threshold=-50, min_req_months=36,
         ticker_rows=[], analysis_result=None, chart_bytes={},
         _sym_last_seq=-9999, _sym_search_results=None,
+        comp_fund_name="", comp_ticker_rows=[],
+        comp__sym_last_seq=-9999, comp__sym_search_results=None,
     ).items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -274,6 +276,37 @@ def _symbols():
         )
 
 
+def _comparison_funds():
+    with st.expander(_T("section_comparison_funds"), expanded=False):
+        st.caption(_T("comp_fund_hint"))
+        st.text_input(
+            _T("comp_fund_name_label"),
+            key="comp_fund_name",
+            placeholder=_T("comp_fund_name_placeholder"),
+        )
+        lang    = st.session_state.lang
+        country = st.session_state.user_country
+        cv = render_symbol_table(
+            rows           = st.session_state.comp_ticker_rows,
+            lang           = lang,
+            country        = country,
+            labels         = _labels(lang),
+            search_results = st.session_state.get("comp__sym_search_results"),
+            key            = "comp_sym",
+        )
+        action = handle(cv, prefix="comp_")
+        if action == "new_results":
+            st.rerun()
+        if action == "rows_update":
+            st.session_state.comp__sym_search_results = None
+        dupes = st.session_state.pop("comp__dup_notice", [])
+        if dupes:
+            st.toast(
+                f"⚠️ {', '.join(dupes)} — {_T('msg_duplicate')}",
+                icon="⚠️",
+            )
+
+
 def _run_button():
     rows = st.session_state.ticker_rows
     ok   = [r for r in rows if r.get("confirmed")]
@@ -312,6 +345,11 @@ def _analyse():
              exchange=r.get("exchange",""),country=r.get("country",""))
         for r in st.session_state.ticker_rows if r.get("confirmed")
     ])
+    # Comparison fund (optional — treated as a single optimized portfolio)
+    comp_rows = [r for r in st.session_state.comp_ticker_rows if r.get("confirmed")]
+    comp_syms = [r["symbol"] for r in comp_rows]
+    comp_name = st.session_state.comp_fund_name.strip() or None
+
     msgs=[]; ph=st.empty()
     def _p(m): msgs.append(m); ph.info("  \n".join(msgs))
     try:
@@ -328,6 +366,8 @@ def _analyse():
             benchmarks_path = BENCHMARKS_PATH,
             lang_dict       = L,
             progress_cb     = _p,
+            comparison_fund_symbols = comp_syms or None,
+            comparison_fund_name    = comp_name,
         )
         _p(_T("step_done"))
         st.session_state.analysis_result=res
@@ -429,6 +469,7 @@ def _results():
 def main():
     _init(); _top_bar(); _basic(); _advanced()
     st.write(""); _symbols()
+    _comparison_funds()
     st.write("")
     if _run_button():
         with st.spinner(""): _analyse()

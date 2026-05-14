@@ -74,6 +74,10 @@ _L: dict[str, dict[str, str]] = {
             "※上部の「期待年率リターン／シャープレシオ」は最適化の理論推定値です。"
             "この表の値は実際の月次リターン系列から計算した実績値のため、数値が異なります。"
         ),
+        "section_comparison_funds": "比較ファンド（任意）",
+        "comp_fund_hint": "比較対象のファンドの銘柄を入力してください。メインと同じ最適化処理を行い、1つのファンドとして全比較チャートに表示されます。",
+        "comp_fund_name_label": "比較ファンド名",
+        "comp_fund_name_placeholder": "例: テック系ファンド",
         "section_cum_bar":  "累積リターン比較",
         "desc_cum_bar":     "分析期間全体の合計リターンを棒グラフで比較します。",
         "section_frontier": "効率的フロンティア",
@@ -214,6 +218,10 @@ _L: dict[str, dict[str, str]] = {
             "* The Expected Return / Sharpe Ratio shown above are optimizer estimates (theoretical). "
             "Values in this table are realized figures computed from actual monthly returns."
         ),
+        "section_comparison_funds": "Comparison Fund (Optional)",
+        "comp_fund_hint": "Enter symbols for a comparison fund. It will be optimized with the same process as your main portfolio and shown as a single fund in all charts.",
+        "comp_fund_name_label": "Comparison Fund Name",
+        "comp_fund_name_placeholder": "e.g. Tech Fund",
         "section_cum_bar":  "Cumulative Return Comparison",
         "desc_cum_bar":     "Total return over the full analysis period, shown as a bar chart.",
         "section_frontier": "Efficient Frontier",
