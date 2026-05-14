@@ -48,6 +48,12 @@ pip install -r requirements.txt
 
 ### 1. Web アプリ（Streamlit）
 
+
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://stocksharpekit-jwudmmjzhudg5nhqgrkzsu.streamlit.app/)
+
+👉 **Live Demo:** https://stocksharpekit-jwudmmjzhudg5nhqgrkzsu.streamlit.app/
+
+ローカルの場合は
 ```bash
 streamlit run app.py
 ```
