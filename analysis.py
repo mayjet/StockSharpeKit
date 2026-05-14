@@ -261,9 +261,27 @@ def run_analysis(
         _returns_for_cov, returns_data=True, frequency=12
     ).ledoit_wolf()
 
-    ef = EfficientFrontier(mu, S)
-    ef.add_constraint(lambda w: w >= min_weight)
-    ef.max_sharpe(risk_free_rate=risk_free_rate)
+    n_assets = len(fund_tickers)
+    # Cap min_weight so that n_assets * min_weight <= 1 (otherwise infeasible)
+    effective_min_weight = min(min_weight, 1.0 / n_assets) if n_assets > 0 else min_weight
+
+    # If all expected returns <= risk_free_rate, max_sharpe is unbounded; use rfr=0
+    opt_rfr = risk_free_rate if float(mu.max()) > risk_free_rate else 0.0
+
+    def _build_ef() -> EfficientFrontier:
+        ef_ = EfficientFrontier(mu, S)
+        if effective_min_weight > 0:
+            ef_.add_constraint(lambda w: w >= effective_min_weight)
+        return ef_
+
+    ef = _build_ef()
+    try:
+        ef.max_sharpe(risk_free_rate=opt_rfr)
+    except Exception:
+        # Fallback: min volatility portfolio
+        ef = _build_ef()
+        ef.min_volatility()
+
     weights        = ef.clean_weights()
     weights_series = pd.Series(weights)
     exp_ret, vol, sharpe = ef.portfolio_performance(risk_free_rate=risk_free_rate)
