@@ -1,5 +1,15 @@
 # 📈 Max Sharpe Portfolio Analyzer
 
+
+<p align="center">
+  <a href="https://stocksharpekit-jwudmmjzhudg5nhqgrkzsu.streamlit.app/">
+    <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg">
+  </a>
+</p>
+
+## Demo : [アプリを開く](https://stocksharpekit-jwudmmjzhudg5nhqgrkzsu.streamlit.app/)
+
+
 現代ポートフォリオ理論（MPT）に基づき、**シャープレシオを最大化する最適な資産配分**を求める株式ポートフォリオ分析ツールです。
 
 > ⚠️ **免責事項**: 本ツールは過去データに基づく分析を行います。過去の運用実績は将来の運用成果を保証するものではありません。投資判断はご自身の責任で行ってください。
@@ -37,8 +47,8 @@
 ## インストール
 
 ```bash
-git clone https://github.com/<your-org>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/mayjet/StockSharpeKit.git
+cd StockSharpeKit
 pip install -r requirements.txt
 ```
 
@@ -48,12 +58,8 @@ pip install -r requirements.txt
 
 ### 1. Web アプリ（Streamlit）
 
-
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://stocksharpekit-jwudmmjzhudg5nhqgrkzsu.streamlit.app/)
-
-👉 **Live Demo:** https://stocksharpekit-jwudmmjzhudg5nhqgrkzsu.streamlit.app/
-
 ローカルの場合は
+
 ```bash
 streamlit run app.py
 ```
