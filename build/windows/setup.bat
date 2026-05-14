@@ -19,18 +19,73 @@ REM ============================================
 echo.
 echo [1/6] Checking Python...
 
+set "PY_CMD="
+
 python --version >nul 2>&1
-if not errorlevel 1 goto :python_found
+if not errorlevel 1 (
+    set "PY_CMD=python"
+    goto :python_found
+)
+
+python3 --version >nul 2>&1
+if not errorlevel 1 (
+    set "PY_CMD=python3"
+    goto :python_found
+)
 
 py --version >nul 2>&1
-if not errorlevel 1 goto :python_found
+if not errorlevel 1 (
+    set "PY_CMD=py"
+    goto :python_found
+)
 
-echo [ERROR] Python is not installed or not in PATH.
-echo         Download from: https://www.python.org/downloads/
+REM Check common install locations
+for %%D in (
+    "%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+    "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+    "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+    "%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
+    "%ProgramFiles%\Python313\python.exe"
+    "%ProgramFiles%\Python312\python.exe"
+    "%ProgramFiles%\Python311\python.exe"
+    "%ProgramFiles%\Python310\python.exe"
+) do (
+    if exist %%D (
+        set "PY_CMD=%%~D"
+        goto :python_found
+    )
+)
+
+REM Python not found - try winget auto-install
+echo [setup] Python not found. Attempting install via winget...
+where winget >nul 2>&1
+if errorlevel 1 goto :no_python
+
+winget install --id Python.Python.3.11 --accept-source-agreements --accept-package-agreements
+if errorlevel 1 goto :no_python
+
+REM Refresh PATH for this session
+for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "PATH=%%B;%PATH%"
+for /f "tokens=2*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "PATH=%%B;%PATH%"
+
+python --version >nul 2>&1
+if not errorlevel 1 (
+    set "PY_CMD=python"
+    goto :python_found
+)
+
+echo [WARN]  Python was installed but not found in current session.
+echo         Close this terminal, open a new one, and run this script again.
+exit /b 1
+
+:no_python
+echo [ERROR] Python is not installed and could not be auto-installed.
+echo         Install manually from: https://www.python.org/downloads/
+echo         Or via winget: winget install Python.Python.3.11
 exit /b 1
 
 :python_found
-for /f "tokens=*" %%V in ('python --version 2^>nul') do echo [setup] %%V found.
+for /f "tokens=*" %%V in ('!PY_CMD! --version 2^>nul') do echo [setup] !PY_CMD! - %%V found.
 
 REM ============================================
 REM  Step 2: Check / Install uv
@@ -43,14 +98,8 @@ if not errorlevel 1 goto :uv_found
 
 echo [setup] uv not found. Installing via pip...
 
-pip install uv >nul 2>&1
-if not errorlevel 1 goto :uv_pip_done
-
-echo [setup] pip failed. Trying python -m pip...
-python -m pip install uv
+!PY_CMD! -m pip install uv
 if errorlevel 1 goto :uv_install_failed
-
-:uv_pip_done
 echo [setup] uv package installed.
 
 REM Check if uv is now in PATH
@@ -59,7 +108,7 @@ if not errorlevel 1 goto :uv_found
 
 REM uv installed but not in PATH - find it via Python sysconfig
 echo [setup] uv not in PATH. Searching...
-for /f "delims=" %%P in ('python -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2^>nul') do (
+for /f "delims=" %%P in ('!PY_CMD! -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2^>nul') do (
     if exist "%%P\uv.exe" (
         set "UV_CMD=%%P\uv.exe"
         echo [setup] Found: %%P\uv.exe
@@ -179,7 +228,7 @@ for %%I in ("%cd%") do set "DIR_NAME=%%~nxI"
 set "KERNEL_NAME=!DIR_NAME!_kernel"
 echo [setup] Registering kernel: !KERNEL_NAME!
 
-python -m ipykernel install --user --name "!KERNEL_NAME!" --display-name "Python (!VENV_DIR!)" >nul 2>&1
+!PY_CMD! -m ipykernel install --user --name "!KERNEL_NAME!" --display-name "Python (!VENV_DIR!)" >nul 2>&1
 if errorlevel 1 goto :kernel_failed
 
 echo [setup] Kernel registered: !KERNEL_NAME!
