@@ -61,7 +61,7 @@ def _init():
     for k, v in dict(
         lang="JP", portfolio_name="MyPortfolio",
         start_date=_sd_default, end_date=today,
-        risk_free_rate=0.001, min_weight=0.0,
+        risk_free_rate=0.0, min_weight=0.0,
         user_country="JP", mdd_threshold=-50, min_req_months=36,
         ticker_rows=[], analysis_result=None, chart_bytes={},
         _sym_last_seq=-9999, _sym_search_results=None,
@@ -211,12 +211,15 @@ def _advanced():
         with c1:
             st.session_state.risk_free_rate=st.number_input(
                 _T("label_risk_free_rate"),value=float(st.session_state.risk_free_rate),
-                step=0.0001,format="%.4f",key="rfr")
+                min_value=0.0,step=0.1,format="%.2f",key="rfr")
             st.caption(_T("desc_risk_free_rate"))
         with c2:
-            st.session_state.min_weight=st.number_input(
+            _mw=st.number_input(
                 _T("label_min_weight"),value=float(st.session_state.min_weight),
-                min_value=0.0,max_value=1.0,step=0.01,format="%.2f",key="mw")
+                min_value=0.0,max_value=100.0,step=1.0,format="%.1f",key="mw")
+            if _mw != st.session_state.min_weight and _mw != 0.0:
+                st.toast(_T("warn_min_weight"), icon="⚠️")
+            st.session_state.min_weight=_mw
             st.caption(_T("desc_min_weight"))
         with c3:
             idx=COUNTRY_OPTIONS.index(st.session_state.user_country) \
@@ -317,8 +320,8 @@ def _analyse():
             portfolio_name  = st.session_state.portfolio_name,
             start_date      = str(st.session_state.start_date),
             end_date        = str(st.session_state.end_date),
-            risk_free_rate  = float(st.session_state.risk_free_rate),
-            min_weight      = float(st.session_state.min_weight),
+            risk_free_rate  = float(st.session_state.risk_free_rate) / 100,
+            min_weight      = float(st.session_state.min_weight) / 100,
             user_country    = st.session_state.user_country,
             mdd_threshold   = float(st.session_state.mdd_threshold)/100,
             min_req_months  = int(st.session_state.min_req_months),
