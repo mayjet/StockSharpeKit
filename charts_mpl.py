@@ -1,6 +1,7 @@
 """
 charts_mpl.py — Matplotlib chart builders.
 Each function returns PNG bytes (io.BytesIO content) for st.download_button.
+Supports multiple funds via result.funds list.
 """
 
 from __future__ import annotations
@@ -32,12 +33,29 @@ _OPT_COLOR    = "#EAB308"
 _BENCH_COLORS_M = ["#E67E22", "#16A085", "#8E44AD", "#E74C3C", "#2C3E50"]
 _DEFAULT_BENCH_STYLES = ["dashed", "dotted", "dashdot", "solid", "dashed"]
 
+# Per-fund defaults
+_FUND_COLORS = ["#2563EB", "#E74C3C", "#16A085", "#8E44AD",
+                "#F39C12", "#1ABC9C", "#E67E22", "#3498DB"]
+
 STYLE_TO_LS = {
     "solid": "-", "dashed": "--", "dotted": ":", "dashdot": "-.",
 }
 
+def _resolve_multi(n_funds: int, n_bench: int, custom: dict | None = None):
+    """Return (fund_colors, fund_ls, bench_colors, bench_ls)."""
+    c = custom or {}
+    fc_list = c.get("fund_colors", _FUND_COLORS)
+    fs_list = c.get("fund_styles", ["solid"] * n_funds)
+    fund_colors = [fc_list[i % len(fc_list)] for i in range(n_funds)]
+    fund_ls = [STYLE_TO_LS.get(fs_list[i % len(fs_list)], "-") for i in range(n_funds)]
+    bl = c.get("benchmarks", _BENCH_COLORS_M)
+    bs = c.get("bench_styles", _DEFAULT_BENCH_STYLES)
+    bench_colors = [bl[i % len(bl)] for i in range(n_bench)]
+    bench_ls = [STYLE_TO_LS.get(bs[i % len(bs)], "--") for i in range(n_bench)]
+    return fund_colors, fund_ls, bench_colors, bench_ls
+
 def _resolve(n_bench: int, custom: dict | None = None):
-    """Return (pf_color, bench_colors, pf_ls, bench_ls)."""
+    """Legacy: Return (pf_color, bench_colors, pf_ls, bench_ls)."""
     c = custom or {}
     pf_c = c.get("portfolio", _PF_COLOR)
     bl   = c.get("benchmarks", _BENCH_COLORS_M)
@@ -69,21 +87,28 @@ def mpl_cum_bar(result: AnalysisResult, L: dict, custom: dict | None = None) -> 
     )
     df = df.sort_values(L["col_cum_return"], ascending=False)
 
-    labels = df[L["col_portfolio"]].tolist()
+    labels_list = df[L["col_portfolio"]].tolist()
     values = df[L["col_cum_return"]].tolist()
-    pf_c, bench_c, _, _ = _resolve(len(result.bench_tickers), custom)
+
+    n_funds = len(result.funds)
+    n_bench = len(result.bench_tickers)
+    fc, fls, bc, bls = _resolve_multi(n_funds, n_bench, custom)
+
+    fund_names = [fr.fund_name for fr in result.funds]
     bench_names = [result.benchmark_labels[s] for s in result.bench_tickers]
-    _cmap = {result.portfolio_name: pf_c}
+    _cmap = {}
+    for i, fn in enumerate(fund_names):
+        _cmap[fn] = fc[i]
     for i, bn in enumerate(bench_names):
-        _cmap[bn] = bench_c[i]
-    colors = [_cmap.get(lb, _BENCH_COLOR) for lb in labels]
+        _cmap[bn] = bc[i]
+    colors = [_cmap.get(lb, _BENCH_COLOR) for lb in labels_list]
 
     fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
-    bars = ax.bar(range(len(labels)), values, color=colors, alpha=BAR_ALPHA)
+    bars = ax.bar(range(len(labels_list)), values, color=colors, alpha=BAR_ALPHA)
     ax.set_title(L["cum_bar_title"], fontsize=14)
     ax.set_ylabel(L["cum_bar_ylabel"], fontsize=11)
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=10)
+    ax.set_xticks(range(len(labels_list)))
+    ax.set_xticklabels(labels_list, rotation=30, ha="right", fontsize=10)
     ax.grid(axis="y", linestyle="--", alpha=GRID_ALPHA)
     for rect, val in zip(bars, values):
         ax.text(rect.get_x() + rect.get_width() / 2, rect.get_height(),
@@ -94,12 +119,18 @@ def mpl_cum_bar(result: AnalysisResult, L: dict, custom: dict | None = None) -> 
 
 # ── 2. Efficient frontier ─────────────────────────────────────────────────────
 
-def mpl_efficient_frontier(result: AnalysisResult, L: dict) -> bytes:
-    mu   = result.mu
-    S    = result.S
-    rfr  = result.risk_free_rate
-    sym_to_name = dict(zip(result.confirmed_df["symbol"],
-                           result.confirmed_df.get("name", result.confirmed_df["symbol"])))
+def mpl_efficient_frontier(result: AnalysisResult, L: dict, fund_idx: int = 0) -> bytes:
+    fr = result.funds[fund_idx] if fund_idx < len(result.funds) else None
+    if fr is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        plt.tight_layout()
+        return _to_bytes(fig)
+
+    mu  = fr.mu
+    S   = fr.S
+    rfr = result.risk_free_rate
+    sym_to_name = dict(zip(fr.confirmed_df["symbol"],
+                           fr.confirmed_df.get("name", fr.confirmed_df["symbol"])))
 
     fig, ax = plt.subplots(figsize=(10, 6))   # 縦横比 3:5
 
@@ -121,11 +152,11 @@ def mpl_efficient_frontier(result: AnalysisResult, L: dict) -> bytes:
     # CML
     if vols:
         cml_x = np.linspace(0, max(vols) * 1.1, 50)
-        cml_y = rfr * 100 + result.sharpe * cml_x
+        cml_y = rfr * 100 + fr.sharpe * cml_x
         ax.plot(cml_x, cml_y, label=L["chart_cml"], color=_PF_COLOR)
 
     # Long-term assets
-    long_tickers = [t for t in result.fund_tickers if t not in result.short_term_tickers]
+    long_tickers = [t for t in fr.fund_tickers if t not in fr.short_term_tickers]
     if long_tickers:
         vv = [float(np.sqrt(S.loc[t, t])) * 100 for t in long_tickers]
         rr = [float(mu[t]) * 100 for t in long_tickers]
@@ -135,27 +166,30 @@ def mpl_efficient_frontier(result: AnalysisResult, L: dict) -> bytes:
             ax.annotate(name, (vv[i], rr[i]), fontsize=7, alpha=0.75)
 
     # Short-term
-    if result.short_term_tickers:
-        vv = [float(np.sqrt(S.loc[t, t])) * 100 for t in result.short_term_tickers if t in S.index]
-        rr = [float(mu[t]) * 100 for t in result.short_term_tickers if t in mu.index]
+    if fr.short_term_tickers:
+        vv = [float(np.sqrt(S.loc[t, t])) * 100 for t in fr.short_term_tickers if t in S.index]
+        rr = [float(mu[t]) * 100 for t in fr.short_term_tickers if t in mu.index]
         if vv:
             ax.scatter(vv, rr, color=_SHORT_COLOR, s=200, marker="^",
                        label=L["chart_short_term"], zorder=6)
 
     # High MDD
-    if result.knockout_tickers:
-        vv = [float(np.sqrt(S.loc[t, t])) * 100 for t in result.knockout_tickers if t in S.index]
-        rr = [float(mu[t]) * 100 for t in result.knockout_tickers if t in mu.index]
+    if fr.knockout_tickers:
+        vv = [float(np.sqrt(S.loc[t, t])) * 100 for t in fr.knockout_tickers if t in S.index]
+        rr = [float(mu[t]) * 100 for t in fr.knockout_tickers if t in mu.index]
         if vv:
             ax.scatter(vv, rr, color=_MDD_COLOR, s=80,
                        label=L["chart_high_mdd"], zorder=7)
 
-    # Optimal
-    ax.scatter(result.volatility * 100, result.expected_return * 100,
+    # Optimal point
+    ax.scatter(fr.volatility * 100, fr.expected_return * 100,
                marker="*", s=400, color=_OPT_COLOR, zorder=8,
                label=L["chart_optimal"])
 
-    ax.set_title(L["ef_title"], fontsize=14)
+    _title = L["ef_title"]
+    if len(result.funds) > 1:
+        _title += f" — {fr.fund_name}"
+    ax.set_title(_title, fontsize=14)
     ax.set_xlabel(L["ef_xlabel"], fontsize=11)
     ax.set_ylabel(L["ef_ylabel"], fontsize=11)
     ax.legend(fontsize=9)
@@ -167,25 +201,32 @@ def mpl_efficient_frontier(result: AnalysisResult, L: dict) -> bytes:
 # ── 3. Cumulative return line ─────────────────────────────────────────────────
 
 def mpl_cum_line(result: AnalysisResult, L: dict, custom: dict | None = None) -> bytes:
-    pf_c, bench_c, pf_ls, bench_ls = _resolve(len(result.bench_tickers), custom)
+    n_funds = len(result.funds)
+    n_bench = len(result.bench_tickers)
+    fc, fls, bc, bls = _resolve_multi(n_funds, n_bench, custom)
+
     fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
 
-    pf_cum = (1 + result.portfolio_returns).cumprod() - 1
-    zero   = pd.Series([0.0], index=[pf_cum.index[0] - pd.DateOffset(months=1)])
-    pf_cum = pd.concat([zero, pf_cum])
-    ax.plot(pf_cum.index, pf_cum * 100,
-            label=result.portfolio_name, color=pf_c, linewidth=2.5, linestyle=pf_ls)
+    # All funds
+    for fi, fr in enumerate(result.funds):
+        pf_cum = (1 + fr.portfolio_returns).cumprod() - 1
+        zero   = pd.Series([0.0], index=[pf_cum.index[0] - pd.DateOffset(months=1)])
+        pf_cum = pd.concat([zero, pf_cum])
+        ax.plot(pf_cum.index, pf_cum * 100,
+                label=fr.fund_name, color=fc[fi], linewidth=2.5, linestyle=fls[fi])
 
     # Benchmarks
+    _ref_idx = result.funds[0].portfolio_returns.index if result.funds else pd.Index([])
     for i, sym in enumerate(result.bench_tickers):
         label   = result.benchmark_labels[sym]
         bseries = result.bench_returns[sym].dropna()
-        bseries = bseries.loc[result.portfolio_returns.index[0]:]
+        if not _ref_idx.empty:
+            bseries = bseries.loc[_ref_idx[0]:]
         cum     = (1 + bseries).cumprod() - 1
         zero    = pd.Series([0.0], index=[cum.index[0] - pd.DateOffset(months=1)])
         cum     = pd.concat([zero, cum])
         ax.plot(cum.index, cum * 100,
-                label=label, color=bench_c[i], linewidth=1.5, linestyle=bench_ls[i])
+                label=label, color=bc[i], linewidth=1.5, linestyle=bls[i])
 
     ax.set_title(L["cum_line_title"], fontsize=14)
     ax.set_xlabel(L["chart_date"], fontsize=11)
@@ -199,22 +240,27 @@ def mpl_cum_line(result: AnalysisResult, L: dict, custom: dict | None = None) ->
 # ── 4. Rolling Sharpe ─────────────────────────────────────────────────────────
 
 def mpl_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12, custom: dict | None = None) -> bytes:
-    pf_c, bench_c, pf_ls, bench_ls = _resolve(len(result.bench_tickers), custom)
+    n_funds = len(result.funds)
+    n_bench = len(result.bench_tickers)
+    fc, fls, bc, bls = _resolve_multi(n_funds, n_bench, custom)
+
     fig, ax = plt.subplots(figsize=(FIG_W, 5))
 
     def _rs(series: pd.Series) -> pd.Series:
         return (series.rolling(window).mean() / series.rolling(window).std()) * np.sqrt(12)
 
-    rs_pf = _rs(result.portfolio_returns)
-    ax.plot(rs_pf.index, rs_pf, label=result.portfolio_name,
-            color=pf_c, linewidth=2.5, linestyle=pf_ls)
+    # All funds
+    for fi, fr in enumerate(result.funds):
+        rs_pf = _rs(fr.portfolio_returns)
+        ax.plot(rs_pf.index, rs_pf, label=fr.fund_name,
+                color=fc[fi], linewidth=2.5, linestyle=fls[fi])
 
     for i, sym in enumerate(result.bench_tickers):
         rs = _rs(result.bench_returns[sym].dropna())
         ax.plot(rs.index, rs, label=result.benchmark_labels[sym],
-                color=bench_c[i],
+                color=bc[i],
                 linewidth=1.5,
-                linestyle=bench_ls[i])
+                linestyle=bls[i])
 
     ax.axhline(0, color="black", linewidth=0.8, linestyle=":")
     ax.set_title(L["roll_title"].format(w=window), fontsize=14)
@@ -229,7 +275,9 @@ def mpl_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12, custom
 # ── 5. Drawdown ───────────────────────────────────────────────────────────────
 
 def mpl_drawdown(result: AnalysisResult, L: dict, custom: dict | None = None) -> bytes:
-    pf_c, bench_c, pf_ls, bench_ls = _resolve(len(result.bench_tickers), custom)
+    n_funds = len(result.funds)
+    n_bench = len(result.bench_tickers)
+    fc, fls, bc, bls = _resolve_multi(n_funds, n_bench, custom)
 
     def _dd(series: pd.Series) -> pd.Series:
         cum  = (1 + series).cumprod()
@@ -238,19 +286,26 @@ def mpl_drawdown(result: AnalysisResult, L: dict, custom: dict | None = None) ->
 
     fig, ax = plt.subplots(figsize=(FIG_W, 5))
 
-    dd_pf = _dd(result.portfolio_returns)
-    ax.fill_between(dd_pf.index, dd_pf, 0,
-                    alpha=0.35, color=pf_c, label=result.portfolio_name)
-    ax.plot(dd_pf.index, dd_pf, color=pf_c, linewidth=1.5)
+    # All funds
+    for fi, fr in enumerate(result.funds):
+        dd_pf = _dd(fr.portfolio_returns)
+        if fi == 0:
+            ax.fill_between(dd_pf.index, dd_pf, 0,
+                            alpha=0.35, color=fc[fi], label=fr.fund_name)
+        ax.plot(dd_pf.index, dd_pf, color=fc[fi], linewidth=1.5 if fi > 0 else 1.5,
+                linestyle=fls[fi],
+                label=fr.fund_name if fi > 0 else None)
 
+    _ref_idx = result.funds[0].portfolio_returns.index if result.funds else pd.Index([])
     for i, sym in enumerate(result.bench_tickers):
         bseries = result.bench_returns[sym].dropna()
-        bseries = bseries.loc[result.portfolio_returns.index[0]:]
+        if not _ref_idx.empty:
+            bseries = bseries.loc[_ref_idx[0]:]
         dd = _dd(bseries)
         ax.plot(dd.index, dd, label=result.benchmark_labels[sym],
-                color=bench_c[i],
+                color=bc[i],
                 linewidth=1.5,
-                linestyle=bench_ls[i])
+                linestyle=bls[i])
 
     ax.set_title(L["dd_title"], fontsize=14)
     ax.set_xlabel(L["chart_date"], fontsize=11)
