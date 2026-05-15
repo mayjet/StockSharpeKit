@@ -159,6 +159,93 @@ def handle(cv: dict | None, prefix: str = "") -> str:
     return "none"
 
 
+def handle_fund(cv: dict | None, fund: dict) -> str:
+    """
+    Process component value for a multi-fund entry.
+    fund: mutable dict with keys 'ticker_rows', '_sym_last_seq', '_sym_search_results'.
+    Modifies fund in-place.
+
+    Returns same strings as handle(): "new_results" | "rows_update" | "none"
+    """
+    if not cv:
+        return "none"
+
+    action = cv.get("action", "")
+    seq    = int(cv.get("seq", -1))
+    last   = fund.get("_sym_last_seq", -9999)
+
+    if action in ("search", "search_now"):
+        if seq == last:
+            return "none"
+        query = cv.get("query", "").strip()
+        rid   = cv.get("row_id")
+        if not query:
+            return "none"
+        fund["_sym_last_seq"] = seq
+        results = search_suggestions(query, st.session_state.get("user_country", "JP"))
+        fund["_sym_search_results"] = {
+            "single":       True,
+            "row_id":       rid,
+            "results":      results,
+            "seq":          seq,
+            "auto_confirm": action == "search_now",
+        }
+        return "new_results"
+
+    if action == "bulk_paste":
+        if seq == last:
+            return "none"
+        tickers = cv.get("tickers", [])
+        row_ids = cv.get("row_ids", [])
+        fund["_sym_last_seq"] = seq
+        country = st.session_state.get("user_country", "JP")
+
+        confirmed_syms = {
+            r["symbol"].upper()
+            for r in fund.get("ticker_rows", [])
+            if r.get("confirmed")
+        }
+        bulk, dupes = [], []
+        seen = set()
+        for ticker, rid in zip(tickers, row_ids):
+            t = ticker.upper()
+            if t in confirmed_syms or t in seen:
+                dupes.append(ticker)
+                bulk.append({"row_id": rid, "symbol": None,
+                             "name": "", "exchange": "", "country": "", "duplicate": True})
+                continue
+            hit = best_match(ticker, country)
+            sym = hit["symbol"].upper() if hit else None
+            if sym and (sym in confirmed_syms or sym in seen):
+                dupes.append(ticker)
+                bulk.append({"row_id": rid, "symbol": None,
+                             "name": "", "exchange": "", "country": "", "duplicate": True})
+                continue
+            bulk.append({
+                "row_id":   rid,
+                "symbol":   hit["symbol"]           if hit else None,
+                "name":     hit.get("name", "")     if hit else "",
+                "exchange": hit.get("exchange", "")  if hit else "",
+                "country":  hit.get("country", "")   if hit else "",
+                "duplicate": False,
+            })
+            if sym:
+                seen.add(sym)
+
+        fund["_sym_search_results"] = {
+            "bulk": True, "results": bulk, "seq": seq,
+        }
+        fund["_dup_notice"] = dupes if dupes else []
+        return "new_results"
+
+    if action == "rows_update":
+        fund["ticker_rows"] = cv.get("rows", [])
+        fund["_sym_search_results"] = None
+        return "rows_update"
+
+    return "none"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Component HTML / CSS / JS
 # ─────────────────────────────────────────────────────────────────────────────
