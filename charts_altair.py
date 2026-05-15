@@ -20,6 +20,10 @@ _SHORT_COLOR     = "#F59E0B"   # amber
 _MDD_COLOR       = "#EF4444"   # red
 _OPTIMAL_COLOR   = "#EAB308"   # yellow
 
+# Per-benchmark colors and dash patterns (cycling)
+_BENCH_COLORS = ["#E67E22", "#16A085", "#8E44AD", "#E74C3C", "#2C3E50"]
+_BENCH_DASHES = [[6, 4], [2, 2], [8, 4, 2, 4], [12, 6], []]
+
 # ── Time axis helper ───────────────────────────────────────────────────────────
 # 1月のみ "YYYY.1"、それ以外は月番号のみ "2", "3", ... と表示し、毎月縦グリッドを描画
 _MONTH_LABEL_EXPR = (
@@ -84,8 +88,12 @@ def chart_cum_bar(result: AnalysisResult, L: dict) -> alt.Chart:
         .astype(float)
     )
     df = df.sort_values(L["col_cum_return"], ascending=False).reset_index(drop=True)
-    df["_color"] = df[L["col_portfolio"]].apply(
-        lambda n: _PORTFOLIO_COLOR if n == result.portfolio_name else _BENCH_COLOR
+    bench_names = [result.benchmark_labels[s] for s in result.bench_tickers]
+    _color_map = {result.portfolio_name: _PORTFOLIO_COLOR}
+    for i, bn in enumerate(bench_names):
+        _color_map[bn] = _BENCH_COLORS[i % len(_BENCH_COLORS)]
+    df["_color"] = df[L["col_portfolio"]].map(
+        lambda n: _color_map.get(n, _BENCH_COLOR)
     )
     df["_label"] = df[L["col_cum_return"]].map(lambda v: f"{v:.2f}%")
 
@@ -282,12 +290,14 @@ def chart_cum_line(result: AnalysisResult, L: dict) -> alt.Chart:
     if df.empty:
         return alt.Chart(pd.DataFrame()).mark_line()
 
-    # Assign colors
-    all_series  = df["series"].unique().tolist()
-    colors      = [_PORTFOLIO_COLOR] + [_BENCH_COLOR] * (len(all_series) - 1)
-    widths      = [2.5] + [1.5] * (len(all_series) - 1)
+    # Assign per-series styles
+    n_bench     = len(result.bench_tickers)
+    bench_names = [result.benchmark_labels[s] for s in result.bench_tickers]
+    all_series  = [result.portfolio_name] + bench_names
+    colors      = [_PORTFOLIO_COLOR] + [_BENCH_COLORS[i % len(_BENCH_COLORS)] for i in range(n_bench)]
+    widths      = [2.5] + [1.5] * n_bench
+    dashes      = [[]] + [_BENCH_DASHES[i % len(_BENCH_DASHES)] for i in range(n_bench)]
 
-    # Use strokeWidth via condition
     chart = (
         alt.Chart(df)
         .mark_line()
@@ -295,12 +305,16 @@ def chart_cum_line(result: AnalysisResult, L: dict) -> alt.Chart:
             x=_time_x(L["chart_date"]),
             y=alt.Y("value:Q", title=L["chart_cum_ret"]),
             color=alt.Color("series:N",
-                            scale=alt.Scale(domain=all_series,
-                                            range=colors[:len(all_series)]),
+                            scale=alt.Scale(domain=all_series, range=colors),
                             legend=alt.Legend(title=None)),
             strokeWidth=alt.StrokeWidth(
                 "series:N",
-                scale=alt.Scale(domain=all_series, range=widths[:len(all_series)]),
+                scale=alt.Scale(domain=all_series, range=widths),
+                legend=None,
+            ),
+            strokeDash=alt.StrokeDash(
+                "series:N",
+                scale=alt.Scale(domain=all_series, range=dashes),
                 legend=None,
             ),
             tooltip=[
@@ -309,7 +323,7 @@ def chart_cum_line(result: AnalysisResult, L: dict) -> alt.Chart:
                 alt.Tooltip("value:Q", format=".2f", title=L["chart_cum_ret"]),
             ],
         )
-        .properties(height=420)   # 縦横比 1:2（基準幅 840px）
+        .properties(height=420)
         .configure_legend(orient="bottom", columns=3)
     )
     return chart
@@ -339,9 +353,12 @@ def chart_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12) -> a
     if df.empty:
         return alt.layer()
 
-    all_series = [result.portfolio_name] + [result.benchmark_labels[s] for s in result.bench_tickers]
-    colors     = [_PORTFOLIO_COLOR] + [_BENCH_COLOR] * len(result.bench_tickers)
-    widths     = [2.5] + [1.5] * len(result.bench_tickers)
+    n_bench    = len(result.bench_tickers)
+    bench_names = [result.benchmark_labels[s] for s in result.bench_tickers]
+    all_series = [result.portfolio_name] + bench_names
+    colors     = [_PORTFOLIO_COLOR] + [_BENCH_COLORS[i % len(_BENCH_COLORS)] for i in range(n_bench)]
+    widths     = [2.5] + [1.5] * n_bench
+    dashes     = [[]] + [_BENCH_DASHES[i % len(_BENCH_DASHES)] for i in range(n_bench)]
 
     lines = (
         alt.Chart(df)
@@ -350,11 +367,16 @@ def chart_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12) -> a
             x=_time_x(L["chart_date"]),
             y=alt.Y("value:Q", title=L["chart_sharpe"]),
             color=alt.Color("series:N",
-                            scale=alt.Scale(domain=all_series, range=colors[:len(all_series)]),
+                            scale=alt.Scale(domain=all_series, range=colors),
                             legend=alt.Legend(title=None)),
             strokeWidth=alt.StrokeWidth(
                 "series:N",
-                scale=alt.Scale(domain=all_series, range=widths[:len(all_series)]),
+                scale=alt.Scale(domain=all_series, range=widths),
+                legend=None,
+            ),
+            strokeDash=alt.StrokeDash(
+                "series:N",
+                scale=alt.Scale(domain=all_series, range=dashes),
                 legend=None,
             ),
             tooltip=[
@@ -406,9 +428,10 @@ def chart_drawdown(result: AnalysisResult, L: dict) -> alt.LayerChart:
     if df.empty:
         return alt.layer()
 
+    n_bench    = len(result.bench_tickers)
     all_series = [result.portfolio_name] + [result.benchmark_labels[s] for s in result.bench_tickers]
-    colors     = [_PORTFOLIO_COLOR] + [_BENCH_COLOR] * len(result.bench_tickers)
-    widths     = [2.5] + [1.5] * len(result.bench_tickers)
+    colors     = [_PORTFOLIO_COLOR] + [_BENCH_COLORS[i % len(_BENCH_COLORS)] for i in range(n_bench)]
+    widths     = [2.5] + [1.5] * n_bench
 
     pf_df    = df[df["is_portfolio"]]
     bench_df = df[~df["is_portfolio"]]
@@ -440,22 +463,30 @@ def chart_drawdown(result: AnalysisResult, L: dict) -> alt.LayerChart:
     )
 
     if not bench_df.empty:
-        bench_series_list = bench_df["series"].unique().tolist()
-        bench_colors = [_BENCH_COLOR] * len(bench_series_list)
-        bench_widths = [1.5] * len(bench_series_list)
+        n_bench = len(result.bench_tickers)
+        bench_names  = [result.benchmark_labels[s] for s in result.bench_tickers
+                        if result.benchmark_labels[s] in bench_df["series"].values]
+        bench_colors = [_BENCH_COLORS[i % len(_BENCH_COLORS)] for i in range(len(bench_names))]
+        bench_widths = [1.5] * len(bench_names)
+        bench_dashes = [_BENCH_DASHES[i % len(_BENCH_DASHES)] for i in range(len(bench_names))]
         bench_lines = (
             alt.Chart(bench_df)
-            .mark_line(strokeDash=[4, 2])
+            .mark_line()
             .encode(
                 x="date:T",
                 y="value:Q",
                 color=alt.Color("series:N",
-                                scale=alt.Scale(domain=bench_series_list,
+                                scale=alt.Scale(domain=bench_names,
                                                 range=bench_colors),
                                 legend=alt.Legend(title=None)),
                 strokeWidth=alt.StrokeWidth(
                     "series:N",
-                    scale=alt.Scale(domain=bench_series_list, range=bench_widths),
+                    scale=alt.Scale(domain=bench_names, range=bench_widths),
+                    legend=None,
+                ),
+                strokeDash=alt.StrokeDash(
+                    "series:N",
+                    scale=alt.Scale(domain=bench_names, range=bench_dashes),
                     legend=None,
                 ),
                 tooltip=[
@@ -467,7 +498,7 @@ def chart_drawdown(result: AnalysisResult, L: dict) -> alt.LayerChart:
         )
         return (
             alt.layer(area, pf_line, bench_lines)
-            .properties(height=350)   # 縦横比 5:12（基準幅 840px）
+            .properties(height=350)
             .configure_legend(orient="bottom", columns=3)
         )
 
