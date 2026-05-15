@@ -21,7 +21,25 @@ from pypfopt import EfficientFrontier, expected_returns, risk_models
 from symbol_resolver import _yahoo_jp_fetch_monthly, _infer_country_from_symbol
 
 
-# ── Result container ──────────────────────────────────────────────────────────
+# ── Result containers ─────────────────────────────────────────────────────────
+
+@dataclass
+class FundResult:
+    """Per-fund optimization result."""
+    fund_name:          str
+    confirmed_df:       pd.DataFrame          # symbol / name / exchange / country
+    fund_tickers:       list[str]
+    weights:            dict[str, float]       # {symbol: weight}
+    weights_df:         pd.DataFrame           # display table
+    expected_return:    float
+    volatility:         float
+    sharpe:             float
+    short_term_tickers: list[str]
+    knockout_tickers:   list[str]
+    portfolio_returns:  pd.Series
+    mu:                 pd.Series
+    S:                  pd.DataFrame
+
 
 @dataclass
 class AnalysisResult:
@@ -36,32 +54,66 @@ class AnalysisResult:
     min_req_months:  int
     timestamp:       str
 
-    # Data
-    confirmed_df:      pd.DataFrame           # symbol / name / exchange / country
+    # Multiple funds
+    funds:             list[FundResult]
+
+    # Shared data
     prices:            pd.DataFrame
-    fund_tickers:      list[str]
     bench_tickers:     list[str]
     benchmark_labels:  dict[str, str]
 
-    # Optimization outputs
-    weights:          dict[str, float]        # {symbol: weight}
-    weights_df:       pd.DataFrame            # display table
-    expected_return:  float
-    volatility:       float
-    sharpe:           float
-
-    # Classification
-    short_term_tickers: list[str]
-    knockout_tickers:   list[str]
-
     # Returns & metrics
-    portfolio_returns: pd.Series
     bench_returns:     pd.DataFrame
     comparison_df:     pd.DataFrame           # full perf table
 
-    # For efficient frontier chart
-    mu: pd.Series
-    S:  pd.DataFrame
+    # ── Legacy single-fund accessors (for backward compat) ────────────────
+    @property
+    def confirmed_df(self) -> pd.DataFrame:
+        return self.funds[0].confirmed_df if self.funds else pd.DataFrame()
+
+    @property
+    def fund_tickers(self) -> list[str]:
+        return self.funds[0].fund_tickers if self.funds else []
+
+    @property
+    def weights(self) -> dict[str, float]:
+        return self.funds[0].weights if self.funds else {}
+
+    @property
+    def weights_df(self) -> pd.DataFrame:
+        return self.funds[0].weights_df if self.funds else pd.DataFrame()
+
+    @property
+    def expected_return(self) -> float:
+        return self.funds[0].expected_return if self.funds else 0.0
+
+    @property
+    def volatility(self) -> float:
+        return self.funds[0].volatility if self.funds else 0.0
+
+    @property
+    def sharpe(self) -> float:
+        return self.funds[0].sharpe if self.funds else 0.0
+
+    @property
+    def short_term_tickers(self) -> list[str]:
+        return self.funds[0].short_term_tickers if self.funds else []
+
+    @property
+    def knockout_tickers(self) -> list[str]:
+        return self.funds[0].knockout_tickers if self.funds else []
+
+    @property
+    def portfolio_returns(self) -> pd.Series:
+        return self.funds[0].portfolio_returns if self.funds else pd.Series()
+
+    @property
+    def mu(self) -> pd.Series:
+        return self.funds[0].mu if self.funds else pd.Series()
+
+    @property
+    def S(self) -> pd.DataFrame:
+        return self.funds[0].S if self.funds else pd.DataFrame()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -141,16 +193,37 @@ def run_analysis(
     progress_cb:     Callable[[str], None] | None = None,
     comparison_fund_symbols: list[str] | None = None,
     comparison_fund_name:    str | None = None,
+    *,
+    multi_funds: list[dict] | None = None,
 ) -> AnalysisResult:
     """
     Full analysis pipeline. Returns AnalysisResult.
     progress_cb(message) is called at each step for UI feedback.
+
+    multi_funds: list of dicts with keys "name" and "confirmed_df".
+                 When provided, confirmed_df / comparison_fund_* params are ignored.
     """
     L = lang_dict
 
     def _progress(msg: str):
         if progress_cb:
             progress_cb(msg)
+
+    # ── Normalize fund inputs ─────────────────────────────────────────────
+    if multi_funds:
+        fund_inputs = multi_funds
+    else:
+        # Legacy: single main fund + optional comparison
+        fund_inputs = [{"name": portfolio_name, "confirmed_df": confirmed_df}]
+        if comparison_fund_symbols:
+            comp_cdf = pd.DataFrame([
+                {"input": s, "symbol": s, "name": "", "exchange": "", "country": ""}
+                for s in comparison_fund_symbols
+            ])
+            fund_inputs.append({
+                "name": comparison_fund_name or "Comparison Fund",
+                "confirmed_df": comp_cdf,
+            })
 
     # ── Step 1: Load benchmarks ───────────────────────────────────────────
     country_cfg, benchmark_defs, benchmark_master = _load_benchmarks(
@@ -161,11 +234,17 @@ def run_analysis(
 
     # ── Step 2: Download prices ───────────────────────────────────────────
     _progress(L.get("step_download", "Downloading prices..."))
-    fund_tickers = confirmed_df["symbol"].dropna().unique().tolist()
-    # Comparison funds: deduplicate against portfolio and index benchmarks
-    comp_symbols = [s for s in (comparison_fund_symbols or [])
-                    if s not in fund_tickers and s not in benchmark_tickers]
-    all_tickers  = sorted(set(fund_tickers + benchmark_tickers + comp_symbols))
+
+    # Collect all tickers from all funds
+    all_fund_tickers: list[str] = []
+    all_confirmed_dfs: list[pd.DataFrame] = []
+    for fi in fund_inputs:
+        cdf = fi["confirmed_df"]
+        ticks = cdf["symbol"].dropna().unique().tolist()
+        all_fund_tickers.extend(ticks)
+        all_confirmed_dfs.append(cdf)
+    all_fund_tickers_unique = sorted(set(all_fund_tickers))
+    all_tickers = sorted(set(all_fund_tickers_unique + benchmark_tickers))
 
     prices_raw = yf.download(
         all_tickers,
@@ -184,19 +263,20 @@ def run_analysis(
     prices = prices.dropna(axis=1, how="all")
 
     # Yahoo Finance 国際 API にない JP 株への価格フォールバック
-    for _tlist, _label in [(fund_tickers, ""), (comp_symbols, " (comparison)")]:
-        _missing = [t for t in _tlist if t not in prices.columns or prices[t].isna().all()]
-        for t in _missing:
-            if _infer_country_from_symbol(t) == "JP":
-                _progress(L.get("step_download", "Downloading prices...") + f" ({t} → Yahoo Finance Japan…){_label}")
-                jp_s = _yahoo_jp_fetch_monthly(t, start_date, end_date)
-                if not jp_s.empty:
-                    prices[t] = jp_s.reindex(prices.index, method="ffill")
+    _missing = [t for t in all_fund_tickers_unique
+                if t not in prices.columns or prices[t].isna().all()]
+    for t in _missing:
+        if _infer_country_from_symbol(t) == "JP":
+            _progress(L.get("step_download", "Downloading prices...")
+                      + f" ({t} → Yahoo Finance Japan…)")
+            jp_s = _yahoo_jp_fetch_monthly(t, start_date, end_date)
+            if not jp_s.empty:
+                prices[t] = jp_s.reindex(prices.index, method="ffill")
 
-    fund_tickers  = [t for t in fund_tickers  if t in prices.columns]
+    available_fund_tickers = [t for t in all_fund_tickers_unique if t in prices.columns]
     bench_tickers = [t for t in benchmark_tickers if t in prices.columns]
-    comp_tickers  = [t for t in comp_symbols if t in prices.columns]
-    prices = prices[fund_tickers + bench_tickers + comp_tickers]
+    prices = prices[[t for t in prices.columns
+                     if t in available_fund_tickers or t in bench_tickers]]
 
     # FX conversion
     _base_currency  = country_cfg.get("base_currency", "USD")
@@ -207,9 +287,10 @@ def run_analysis(
         if cc not in ("DEFAULT",) and "base_currency" in benchmark_master.get(cc, {})
     }
 
+    _all_confirmed = pd.concat(all_confirmed_dfs, ignore_index=True)
     _fx_cache: dict[str, pd.Series] = {}
-    for t in fund_tickers:
-        row = confirmed_df.loc[confirmed_df["symbol"] == t, "country"]
+    for t in available_fund_tickers:
+        row = _all_confirmed.loc[_all_confirmed["symbol"] == t, "country"]
         if row.empty:
             continue
         src_ccy  = _country_to_currency.get(row.values[0])
@@ -236,147 +317,133 @@ def run_analysis(
             fx_rate = _fx_cache[fx_ticker]
             prices[t] = prices[t] / fx_rate if fx_invert else prices[t] * fx_rate
 
-    # ── Step 3: Short-term check ──────────────────────────────────────────
-    _progress(L.get("step_shortterm", "Checking short-term assets..."))
-    month_counts = prices[fund_tickers].notna().sum()
-    short_term_tickers = [t for t in fund_tickers if month_counts[t] < min_req_months]
-    long_term_tickers  = [t for t in fund_tickers if t not in short_term_tickers]
+    returns_all = prices.pct_change()
+    bench_returns = returns_all[bench_tickers].dropna(how="all") if bench_tickers else pd.DataFrame()
 
-    # ── Step 4: Max drawdown ──────────────────────────────────────────────
-    _progress(L.get("step_mdd", "Computing max drawdown..."))
-    mdd_dict: dict[str, float] = {}
-    for t in fund_tickers:
-        s = prices[t].dropna()
-        if len(s) >= 2:
-            mdd_dict[t] = _max_drawdown(s)
-    knockout_tickers = [t for t, v in mdd_dict.items() if v <= mdd_threshold]
+    # ── Step 3–7: Optimize each fund ──────────────────────────────────────
+    fund_results: list[FundResult] = []
 
-    # ── Step 5: Returns ───────────────────────────────────────────────────
-    returns      = prices.pct_change()
-    fund_returns  = returns[fund_tickers].dropna(how="all")
-    bench_returns = returns[bench_tickers].dropna(how="all")
+    for fi_idx, fi in enumerate(fund_inputs):
+        fund_name = fi["name"]
+        cdf       = fi["confirmed_df"]
+        f_tickers = [t for t in cdf["symbol"].dropna().unique().tolist()
+                     if t in prices.columns]
 
-    # ── Step 5b: Comparison fund (same optimization as main) ────────────
-    _COMP_KEY = "__comp_fund__"
-    if comp_tickers:
-        _progress(L.get("step_optimize", "Optimizing portfolio...") + " (comparison)")
-        comp_returns_all = returns[comp_tickers].dropna(how="all")
-        comp_mu = expected_returns.mean_historical_return(
-            prices[comp_tickers], frequency=12, compounding=False
+        if not f_tickers:
+            continue
+
+        _progress(L.get("step_shortterm", "Checking short-term assets...")
+                  + (f" ({fund_name})" if len(fund_inputs) > 1 else ""))
+        month_counts = prices[f_tickers].notna().sum()
+        short_term = [t for t in f_tickers if month_counts[t] < min_req_months]
+
+        _progress(L.get("step_mdd", "Computing max drawdown...")
+                  + (f" ({fund_name})" if len(fund_inputs) > 1 else ""))
+        mdd_dict: dict[str, float] = {}
+        for t in f_tickers:
+            s = prices[t].dropna()
+            if len(s) >= 2:
+                mdd_dict[t] = _max_drawdown(s)
+        knockout = [t for t, v in mdd_dict.items() if v <= mdd_threshold]
+
+        fund_returns = returns_all[f_tickers].dropna(how="all")
+
+        _progress(L.get("step_optimize", "Optimizing portfolio...")
+                  + (f" ({fund_name})" if len(fund_inputs) > 1 else ""))
+        mu = expected_returns.mean_historical_return(
+            prices[f_tickers], frequency=12, compounding=False
         )
-        _comp_ret_cov = comp_returns_all.dropna()
-        if len(_comp_ret_cov) < max(12, len(comp_tickers) + 1):
-            _comp_ret_cov = comp_returns_all.fillna(0)
-        comp_S = risk_models.CovarianceShrinkage(
-            _comp_ret_cov, returns_data=True, frequency=12
+        _ret_cov = fund_returns.dropna()
+        if len(_ret_cov) < max(12, len(f_tickers) + 1):
+            _ret_cov = fund_returns.fillna(0)
+        S = risk_models.CovarianceShrinkage(
+            _ret_cov, returns_data=True, frequency=12
         ).ledoit_wolf()
 
-        comp_n = len(comp_tickers)
-        comp_eff_min_w = min(min_weight, 1.0 / comp_n) if comp_n > 0 else min_weight
-        comp_opt_rfr = risk_free_rate if float(comp_mu.max()) > risk_free_rate else 0.0
+        n_assets = len(f_tickers)
+        eff_min_w = min(min_weight, 1.0 / n_assets) if n_assets > 0 else min_weight
+        opt_rfr = risk_free_rate if float(mu.max()) > risk_free_rate else 0.0
 
-        def _build_comp_ef() -> EfficientFrontier:
-            ef_ = EfficientFrontier(comp_mu, comp_S)
-            if comp_eff_min_w > 0:
-                ef_.add_constraint(lambda w: w >= comp_eff_min_w)
+        def _build_ef(_mu=mu, _S=S, _emw=eff_min_w) -> EfficientFrontier:
+            ef_ = EfficientFrontier(_mu, _S)
+            if _emw > 0:
+                ef_.add_constraint(lambda w: w >= _emw)
             return ef_
 
-        comp_ef = _build_comp_ef()
-        try:
-            comp_ef.max_sharpe(risk_free_rate=comp_opt_rfr)
-        except Exception:
-            comp_ef = _build_comp_ef()
-            comp_ef.min_volatility()
-
-        comp_weights = pd.Series(comp_ef.clean_weights())
-        comp_portfolio = _calc_portfolio_returns(comp_returns_all, comp_weights)
-        if not comp_portfolio.empty:
-            bench_returns[_COMP_KEY] = comp_portfolio
-            bench_tickers.append(_COMP_KEY)
-            benchmark_labels[_COMP_KEY] = comparison_fund_name or "Comparison Fund"
-
-    # ── Step 6: Optimization ──────────────────────────────────────────────
-    _progress(L.get("step_optimize", "Optimizing portfolio..."))
-    mu = expected_returns.mean_historical_return(
-        prices[fund_tickers], frequency=12, compounding=False
-    )
-    _returns_for_cov = fund_returns.dropna()
-    if len(_returns_for_cov) < max(12, len(fund_tickers) + 1):
-        _returns_for_cov = fund_returns.fillna(0)
-    S = risk_models.CovarianceShrinkage(
-        _returns_for_cov, returns_data=True, frequency=12
-    ).ledoit_wolf()
-
-    n_assets = len(fund_tickers)
-    # Cap min_weight so that n_assets * min_weight <= 1 (otherwise infeasible)
-    effective_min_weight = min(min_weight, 1.0 / n_assets) if n_assets > 0 else min_weight
-
-    # If all expected returns <= risk_free_rate, max_sharpe is unbounded; use rfr=0
-    opt_rfr = risk_free_rate if float(mu.max()) > risk_free_rate else 0.0
-
-    def _build_ef() -> EfficientFrontier:
-        ef_ = EfficientFrontier(mu, S)
-        if effective_min_weight > 0:
-            ef_.add_constraint(lambda w: w >= effective_min_weight)
-        return ef_
-
-    ef = _build_ef()
-    try:
-        ef.max_sharpe(risk_free_rate=opt_rfr)
-    except Exception:
-        # Fallback: min volatility portfolio
         ef = _build_ef()
-        ef.min_volatility()
+        try:
+            ef.max_sharpe(risk_free_rate=opt_rfr)
+        except Exception:
+            ef = _build_ef()
+            ef.min_volatility()
 
-    weights        = ef.clean_weights()
-    weights_series = pd.Series(weights)
-    exp_ret, vol, sharpe = ef.portfolio_performance(risk_free_rate=risk_free_rate)
+        weights      = ef.clean_weights()
+        w_series     = pd.Series(weights)
+        exp_ret, vol, sharpe_val = ef.portfolio_performance(risk_free_rate=risk_free_rate)
+        pf_returns   = _calc_portfolio_returns(fund_returns, w_series)
 
-    # ── Step 7: Portfolio returns ─────────────────────────────────────────
-    portfolio_returns = _calc_portfolio_returns(fund_returns, weights_series)
+        # Weights display table
+        sym_to_name = dict(zip(cdf["symbol"], cdf.get("name", cdf["symbol"])))
+        w_rows = [
+            [f"{sym} / {sym_to_name.get(sym, sym)}", round(w * 100, 2)]
+            for sym, w in weights.items() if w > 0
+        ]
+        w_rows.append([L["col_total"], round(sum(w for w in weights.values() if w > 0) * 100, 2)])
+        w_df = pd.DataFrame(w_rows, columns=[L["col_ticker_name"], L["col_weight"]])
+
+        fund_results.append(FundResult(
+            fund_name          = fund_name,
+            confirmed_df       = cdf,
+            fund_tickers       = f_tickers,
+            weights            = dict(weights),
+            weights_df         = w_df,
+            expected_return    = float(exp_ret),
+            volatility         = float(vol),
+            sharpe             = float(sharpe_val),
+            short_term_tickers = short_term,
+            knockout_tickers   = knockout,
+            portfolio_returns  = pf_returns,
+            mu                 = mu,
+            S                  = S,
+        ))
 
     # ── Step 8: Risk metrics + comparison table ───────────────────────────
     _progress(L.get("step_risk", "Computing risk metrics..."))
     _primary_bench = bench_tickers[0] if bench_tickers else None
 
-    _pf_idx = portfolio_returns.index
-    rows: list[list] = []
-    pr = _perf_stats(portfolio_returns)
-    rows.append([portfolio_name,
-                 _sharpe(pr[0], pr[1], risk_free_rate),
-                 pr[0], pr[1], pr[2]])
+    # Use the first fund's index as the reference for alignment
+    _ref_idx = fund_results[0].portfolio_returns.index if fund_results else pd.Index([])
+
+    comp_rows: list[list] = []
+    for fr in fund_results:
+        pr = _perf_stats(fr.portfolio_returns)
+        comp_rows.append([fr.fund_name,
+                          _sharpe(pr[0], pr[1], risk_free_rate),
+                          pr[0], pr[1], pr[2]])
     for sym in bench_tickers:
-        br = _perf_stats(bench_returns[sym].reindex(_pf_idx).dropna())
-        rows.append([benchmark_labels[sym],
-                     _sharpe(br[0], br[1], risk_free_rate),
-                     br[0], br[1], br[2]])
+        br = _perf_stats(bench_returns[sym].reindex(_ref_idx).dropna())
+        comp_rows.append([benchmark_labels[sym],
+                          _sharpe(br[0], br[1], risk_free_rate),
+                          br[0], br[1], br[2]])
 
     comparison_df = pd.DataFrame(
-        rows,
+        comp_rows,
         columns=[L["col_portfolio"], L["col_sharpe"],
                  L["col_ann_return"], L["col_ann_risk"], L["col_cum_return"]]
     )
 
     if _primary_bench:
-        _bench_clipped = bench_returns[_primary_bench].reindex(_pf_idx).dropna()
-        pm = _calc_risk_metrics(portfolio_returns, _bench_clipped, L)
-        for col, val in pm.items():
-            comparison_df.loc[comparison_df[L["col_portfolio"]] == portfolio_name, col] = val
+        _bench_clipped = bench_returns[_primary_bench].reindex(_ref_idx).dropna()
+        for fr in fund_results:
+            pm = _calc_risk_metrics(fr.portfolio_returns, _bench_clipped, L)
+            for col, val in pm.items():
+                comparison_df.loc[comparison_df[L["col_portfolio"]] == fr.fund_name, col] = val
         for sym in bench_tickers:
             bm = _calc_risk_metrics(
-                bench_returns[sym].reindex(_pf_idx).dropna(), _bench_clipped, L
+                bench_returns[sym].reindex(_ref_idx).dropna(), _bench_clipped, L
             )
             for col, val in bm.items():
                 comparison_df.loc[comparison_df[L["col_portfolio"]] == benchmark_labels[sym], col] = val
-
-    # ── Step 9: Weights display table ─────────────────────────────────────
-    sym_to_name = dict(zip(confirmed_df["symbol"], confirmed_df.get("name", confirmed_df["symbol"])))
-    weight_rows = [
-        [f"{sym} / {sym_to_name.get(sym, sym)}", round(w * 100, 2)]
-        for sym, w in weights.items() if w > 0
-    ]
-    weight_rows.append([L["col_total"], round(sum(w for w in weights.values() if w > 0) * 100, 2)])
-    weights_df = pd.DataFrame(weight_rows, columns=[L["col_ticker_name"], L["col_weight"]])
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -390,21 +457,10 @@ def run_analysis(
         mdd_threshold      = mdd_threshold,
         min_req_months     = min_req_months,
         timestamp          = timestamp,
-        confirmed_df       = confirmed_df,
+        funds              = fund_results,
         prices             = prices,
-        fund_tickers       = fund_tickers,
         bench_tickers      = bench_tickers,
         benchmark_labels   = benchmark_labels,
-        weights            = dict(weights),
-        weights_df         = weights_df,
-        expected_return    = float(exp_ret),
-        volatility         = float(vol),
-        sharpe             = float(sharpe),
-        short_term_tickers = short_term_tickers,
-        knockout_tickers   = knockout_tickers,
-        portfolio_returns  = portfolio_returns,
         bench_returns      = bench_returns,
         comparison_df      = comparison_df,
-        mu                 = mu,
-        S                  = S,
     )
