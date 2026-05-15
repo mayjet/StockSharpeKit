@@ -28,6 +28,28 @@ _SHORT_COLOR  = "#F59E0B"
 _MDD_COLOR    = "#EF4444"
 _OPT_COLOR    = "#EAB308"
 
+# Per-benchmark defaults (cycling)
+_BENCH_COLORS_M = ["#E67E22", "#16A085", "#8E44AD", "#E74C3C", "#2C3E50"]
+_DEFAULT_BENCH_STYLES = ["dashed", "dotted", "dashdot", "solid", "dashed"]
+
+STYLE_TO_LS = {
+    "solid": "-", "dashed": "--", "dotted": ":", "dashdot": "-.",
+}
+
+def _resolve(n_bench: int, custom: dict | None = None):
+    """Return (pf_color, bench_colors, pf_ls, bench_ls)."""
+    c = custom or {}
+    pf_c = c.get("portfolio", _PF_COLOR)
+    bl   = c.get("benchmarks", _BENCH_COLORS_M)
+    pf_s = STYLE_TO_LS.get(c.get("portfolio_style", "solid"), "-")
+    bs   = c.get("bench_styles", _DEFAULT_BENCH_STYLES)
+    return (
+        pf_c,
+        [bl[i % len(bl)] for i in range(n_bench)],
+        pf_s,
+        [STYLE_TO_LS.get(bs[i % len(bs)], "--") for i in range(n_bench)],
+    )
+
 
 def _to_bytes(fig: plt.Figure) -> bytes:
     buf = io.BytesIO()
@@ -39,7 +61,7 @@ def _to_bytes(fig: plt.Figure) -> bytes:
 
 # ── 1. Cumulative return bar ──────────────────────────────────────────────────
 
-def mpl_cum_bar(result: AnalysisResult, L: dict) -> bytes:
+def mpl_cum_bar(result: AnalysisResult, L: dict, custom: dict | None = None) -> bytes:
     df = result.comparison_df[[L["col_portfolio"], L["col_cum_return"]]].copy()
     df[L["col_cum_return"]] = (
         df[L["col_cum_return"]].astype(str)
@@ -49,7 +71,12 @@ def mpl_cum_bar(result: AnalysisResult, L: dict) -> bytes:
 
     labels = df[L["col_portfolio"]].tolist()
     values = df[L["col_cum_return"]].tolist()
-    colors = [_PF_COLOR if lb == result.portfolio_name else _BENCH_COLOR for lb in labels]
+    pf_c, bench_c, _, _ = _resolve(len(result.bench_tickers), custom)
+    bench_names = [result.benchmark_labels[s] for s in result.bench_tickers]
+    _cmap = {result.portfolio_name: pf_c}
+    for i, bn in enumerate(bench_names):
+        _cmap[bn] = bench_c[i]
+    colors = [_cmap.get(lb, _BENCH_COLOR) for lb in labels]
 
     fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
     bars = ax.bar(range(len(labels)), values, color=colors, alpha=BAR_ALPHA)
@@ -139,18 +166,18 @@ def mpl_efficient_frontier(result: AnalysisResult, L: dict) -> bytes:
 
 # ── 3. Cumulative return line ─────────────────────────────────────────────────
 
-def mpl_cum_line(result: AnalysisResult, L: dict) -> bytes:
+def mpl_cum_line(result: AnalysisResult, L: dict, custom: dict | None = None) -> bytes:
+    pf_c, bench_c, pf_ls, bench_ls = _resolve(len(result.bench_tickers), custom)
     fig, ax = plt.subplots(figsize=(FIG_W, FIG_H))
 
-    # Portfolio
     pf_cum = (1 + result.portfolio_returns).cumprod() - 1
     zero   = pd.Series([0.0], index=[pf_cum.index[0] - pd.DateOffset(months=1)])
     pf_cum = pd.concat([zero, pf_cum])
     ax.plot(pf_cum.index, pf_cum * 100,
-            label=result.portfolio_name, color=_PF_COLOR, linewidth=2.5)
+            label=result.portfolio_name, color=pf_c, linewidth=2.5, linestyle=pf_ls)
 
     # Benchmarks
-    for sym in result.bench_tickers:
+    for i, sym in enumerate(result.bench_tickers):
         label   = result.benchmark_labels[sym]
         bseries = result.bench_returns[sym].dropna()
         bseries = bseries.loc[result.portfolio_returns.index[0]:]
@@ -158,7 +185,7 @@ def mpl_cum_line(result: AnalysisResult, L: dict) -> bytes:
         zero    = pd.Series([0.0], index=[cum.index[0] - pd.DateOffset(months=1)])
         cum     = pd.concat([zero, cum])
         ax.plot(cum.index, cum * 100,
-                label=label, color=_BENCH_COLOR, linewidth=1.5, linestyle="--")
+                label=label, color=bench_c[i], linewidth=1.5, linestyle=bench_ls[i])
 
     ax.set_title(L["cum_line_title"], fontsize=14)
     ax.set_xlabel(L["chart_date"], fontsize=11)
@@ -171,7 +198,8 @@ def mpl_cum_line(result: AnalysisResult, L: dict) -> bytes:
 
 # ── 4. Rolling Sharpe ─────────────────────────────────────────────────────────
 
-def mpl_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12) -> bytes:
+def mpl_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12, custom: dict | None = None) -> bytes:
+    pf_c, bench_c, pf_ls, bench_ls = _resolve(len(result.bench_tickers), custom)
     fig, ax = plt.subplots(figsize=(FIG_W, 5))
 
     def _rs(series: pd.Series) -> pd.Series:
@@ -179,12 +207,14 @@ def mpl_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12) -> byt
 
     rs_pf = _rs(result.portfolio_returns)
     ax.plot(rs_pf.index, rs_pf, label=result.portfolio_name,
-            color=_PF_COLOR, linewidth=2.5)
+            color=pf_c, linewidth=2.5, linestyle=pf_ls)
 
-    for sym in result.bench_tickers:
+    for i, sym in enumerate(result.bench_tickers):
         rs = _rs(result.bench_returns[sym].dropna())
         ax.plot(rs.index, rs, label=result.benchmark_labels[sym],
-                color=_BENCH_COLOR, linewidth=1.5, linestyle="--")
+                color=bench_c[i],
+                linewidth=1.5,
+                linestyle=bench_ls[i])
 
     ax.axhline(0, color="black", linewidth=0.8, linestyle=":")
     ax.set_title(L["roll_title"].format(w=window), fontsize=14)
@@ -198,7 +228,9 @@ def mpl_rolling_sharpe(result: AnalysisResult, L: dict, window: int = 12) -> byt
 
 # ── 5. Drawdown ───────────────────────────────────────────────────────────────
 
-def mpl_drawdown(result: AnalysisResult, L: dict) -> bytes:
+def mpl_drawdown(result: AnalysisResult, L: dict, custom: dict | None = None) -> bytes:
+    pf_c, bench_c, pf_ls, bench_ls = _resolve(len(result.bench_tickers), custom)
+
     def _dd(series: pd.Series) -> pd.Series:
         cum  = (1 + series).cumprod()
         peak = cum.cummax()
@@ -208,15 +240,17 @@ def mpl_drawdown(result: AnalysisResult, L: dict) -> bytes:
 
     dd_pf = _dd(result.portfolio_returns)
     ax.fill_between(dd_pf.index, dd_pf, 0,
-                    alpha=0.35, color=_PF_COLOR, label=result.portfolio_name)
-    ax.plot(dd_pf.index, dd_pf, color=_PF_COLOR, linewidth=1.5)
+                    alpha=0.35, color=pf_c, label=result.portfolio_name)
+    ax.plot(dd_pf.index, dd_pf, color=pf_c, linewidth=1.5)
 
-    for sym in result.bench_tickers:
+    for i, sym in enumerate(result.bench_tickers):
         bseries = result.bench_returns[sym].dropna()
         bseries = bseries.loc[result.portfolio_returns.index[0]:]
         dd = _dd(bseries)
         ax.plot(dd.index, dd, label=result.benchmark_labels[sym],
-                color=_BENCH_COLOR, linewidth=1.5, linestyle="--")
+                color=bench_c[i],
+                linewidth=1.5,
+                linestyle=bench_ls[i])
 
     ax.set_title(L["dd_title"], fontsize=14)
     ax.set_xlabel(L["chart_date"], fontsize=11)

@@ -139,6 +139,8 @@ def run_analysis(
     benchmarks_path: str,
     lang_dict:       dict,                    # _L[lang] for column names
     progress_cb:     Callable[[str], None] | None = None,
+    comparison_fund_symbols: list[str] | None = None,
+    comparison_fund_name:    str | None = None,
 ) -> AnalysisResult:
     """
     Full analysis pipeline. Returns AnalysisResult.
@@ -160,7 +162,10 @@ def run_analysis(
     # ── Step 2: Download prices ───────────────────────────────────────────
     _progress(L.get("step_download", "Downloading prices..."))
     fund_tickers = confirmed_df["symbol"].dropna().unique().tolist()
-    all_tickers  = sorted(set(fund_tickers + benchmark_tickers))
+    # Comparison funds: deduplicate against portfolio and index benchmarks
+    comp_symbols = [s for s in (comparison_fund_symbols or [])
+                    if s not in fund_tickers and s not in benchmark_tickers]
+    all_tickers  = sorted(set(fund_tickers + benchmark_tickers + comp_symbols))
 
     prices_raw = yf.download(
         all_tickers,
@@ -179,17 +184,19 @@ def run_analysis(
     prices = prices.dropna(axis=1, how="all")
 
     # Yahoo Finance 国際 API にない JP 株への価格フォールバック
-    missing_fund = [t for t in fund_tickers if t not in prices.columns or prices[t].isna().all()]
-    for t in missing_fund:
-        if _infer_country_from_symbol(t) == "JP":
-            _progress(L.get("step_download", "Downloading prices...") + f" ({t} → Yahoo Finance Japan…)")
-            jp_s = _yahoo_jp_fetch_monthly(t, start_date, end_date)
-            if not jp_s.empty:
-                prices[t] = jp_s.reindex(prices.index, method="ffill")
+    for _tlist, _label in [(fund_tickers, ""), (comp_symbols, " (comparison)")]:
+        _missing = [t for t in _tlist if t not in prices.columns or prices[t].isna().all()]
+        for t in _missing:
+            if _infer_country_from_symbol(t) == "JP":
+                _progress(L.get("step_download", "Downloading prices...") + f" ({t} → Yahoo Finance Japan…){_label}")
+                jp_s = _yahoo_jp_fetch_monthly(t, start_date, end_date)
+                if not jp_s.empty:
+                    prices[t] = jp_s.reindex(prices.index, method="ffill")
 
     fund_tickers  = [t for t in fund_tickers  if t in prices.columns]
     bench_tickers = [t for t in benchmark_tickers if t in prices.columns]
-    prices = prices[fund_tickers + bench_tickers]
+    comp_tickers  = [t for t in comp_symbols if t in prices.columns]
+    prices = prices[fund_tickers + bench_tickers + comp_tickers]
 
     # FX conversion
     _base_currency  = country_cfg.get("base_currency", "USD")
@@ -248,6 +255,45 @@ def run_analysis(
     returns      = prices.pct_change()
     fund_returns  = returns[fund_tickers].dropna(how="all")
     bench_returns = returns[bench_tickers].dropna(how="all")
+
+    # ── Step 5b: Comparison fund (same optimization as main) ────────────
+    _COMP_KEY = "__comp_fund__"
+    if comp_tickers:
+        _progress(L.get("step_optimize", "Optimizing portfolio...") + " (comparison)")
+        comp_returns_all = returns[comp_tickers].dropna(how="all")
+        comp_mu = expected_returns.mean_historical_return(
+            prices[comp_tickers], frequency=12, compounding=False
+        )
+        _comp_ret_cov = comp_returns_all.dropna()
+        if len(_comp_ret_cov) < max(12, len(comp_tickers) + 1):
+            _comp_ret_cov = comp_returns_all.fillna(0)
+        comp_S = risk_models.CovarianceShrinkage(
+            _comp_ret_cov, returns_data=True, frequency=12
+        ).ledoit_wolf()
+
+        comp_n = len(comp_tickers)
+        comp_eff_min_w = min(min_weight, 1.0 / comp_n) if comp_n > 0 else min_weight
+        comp_opt_rfr = risk_free_rate if float(comp_mu.max()) > risk_free_rate else 0.0
+
+        def _build_comp_ef() -> EfficientFrontier:
+            ef_ = EfficientFrontier(comp_mu, comp_S)
+            if comp_eff_min_w > 0:
+                ef_.add_constraint(lambda w: w >= comp_eff_min_w)
+            return ef_
+
+        comp_ef = _build_comp_ef()
+        try:
+            comp_ef.max_sharpe(risk_free_rate=comp_opt_rfr)
+        except Exception:
+            comp_ef = _build_comp_ef()
+            comp_ef.min_volatility()
+
+        comp_weights = pd.Series(comp_ef.clean_weights())
+        comp_portfolio = _calc_portfolio_returns(comp_returns_all, comp_weights)
+        if not comp_portfolio.empty:
+            bench_returns[_COMP_KEY] = comp_portfolio
+            bench_tickers.append(_COMP_KEY)
+            benchmark_labels[_COMP_KEY] = comparison_fund_name or "Comparison Fund"
 
     # ── Step 6: Optimization ──────────────────────────────────────────────
     _progress(L.get("step_optimize", "Optimizing portfolio..."))
