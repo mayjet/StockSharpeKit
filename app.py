@@ -20,6 +20,8 @@ from downloads import (
     build_output_json, build_zip,
 )
 from cloud_backup import upload_to_drive_async
+from charts_altair import DEFAULT_COLORS as _ALT_DEFAULTS, DEFAULT_STYLES as _ALT_STYLE_DEFAULTS
+from analysis import _load_benchmarks
 
 st.set_page_config(
     page_title="Max Sharpe Portfolio Analyzer for Stock League",
@@ -67,6 +69,10 @@ def _init():
         _sym_last_seq=-9999, _sym_search_results=None,
         comp_fund_name="", comp_ticker_rows=[],
         comp__sym_last_seq=-9999, comp__sym_search_results=None,
+        color_portfolio=_ALT_DEFAULTS["portfolio"],
+        color_bench=list(_ALT_DEFAULTS["benchmarks"]),
+        style_portfolio=_ALT_STYLE_DEFAULTS["portfolio"],
+        style_bench=list(_ALT_STYLE_DEFAULTS["benchmarks"]),
     ).items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -307,6 +313,92 @@ def _comparison_funds():
             )
 
 
+def _bench_names() -> list[str]:
+    """Return display names for index benchmarks + comparison fund."""
+    try:
+        _, defs, _ = _load_benchmarks(BENCHMARKS_PATH, st.session_state.user_country)
+        names = [b["name"] for b in defs]
+    except Exception:
+        names = []
+    comp_name = st.session_state.get("comp_fund_name", "").strip()
+    comp_rows = [r for r in st.session_state.get("comp_ticker_rows", []) if r.get("confirmed")]
+    if comp_rows:
+        names.append(comp_name or "Comparison Fund")
+    return names
+
+
+_STYLE_KEYS = ["solid", "dashed", "dotted", "dashdot"]
+
+
+def _chart_colors():
+    with st.expander(_T("section_chart_colors"), expanded=False):
+        # Tighten gap between color picker and selectbox inside bordered cards
+        st.markdown("""<style>
+        [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] {
+            gap: 0.25rem !important;
+        }
+        </style>""", unsafe_allow_html=True)
+
+        bench_colors = st.session_state.color_bench
+        bench_styles = st.session_state.style_bench
+        names = _bench_names()
+
+        items = [
+            (_T("color_portfolio_label"), "color_portfolio",
+             st.session_state.color_portfolio,
+             "_sel_pf_style", st.session_state.style_portfolio),
+        ]
+        for i in range(len(bench_colors)):
+            label = names[i] if i < len(names) else f"{_T('color_bench_label')} {i + 1}"
+            cur_style = bench_styles[i] if i < len(bench_styles) else "dashed"
+            items.append((label, f"_cp_bench_{i}", bench_colors[i],
+                          f"_sel_bench_style_{i}", cur_style))
+
+        cards_per_row = 3
+        for row_start in range(0, len(items), cards_per_row):
+            row_items = items[row_start:row_start + cards_per_row]
+            cols = st.columns(len(row_items))
+            for j, (label, c_key, c_val, s_key, s_val) in enumerate(row_items):
+                with cols[j]:
+                    with st.container(border=True):
+                        st.markdown(f"**{label}**")
+                        sc1, sc2 = st.columns([1, 2], vertical_alignment="center")
+                        with sc1:
+                            new_c = st.color_picker(
+                                c_key, value=c_val, key=c_key,
+                                label_visibility="collapsed",
+                            )
+                        with sc2:
+                            sel = st.selectbox(
+                                s_key, _STYLE_KEYS, key=s_key,
+                                index=_STYLE_KEYS.index(s_val) if s_val in _STYLE_KEYS else 0,
+                                format_func=lambda k: _T(f"style_{k}"),
+                                label_visibility="collapsed",
+                            )
+
+                        if c_key == "color_portfolio":
+                            st.session_state.style_portfolio = sel
+                        else:
+                            idx = int(c_key.split("_")[-1])
+                            bench_colors[idx] = new_c
+                            if idx < len(bench_styles):
+                                bench_styles[idx] = sel
+                            else:
+                                bench_styles.append(sel)
+
+        st.session_state.color_bench = bench_colors
+        st.session_state.style_bench = bench_styles
+
+
+def _get_custom_colors() -> dict:
+    return {
+        "portfolio": st.session_state.color_portfolio,
+        "benchmarks": list(st.session_state.color_bench),
+        "portfolio_style": st.session_state.style_portfolio,
+        "bench_styles": list(st.session_state.style_bench),
+    }
+
+
 def _run_button():
     rows = st.session_state.ticker_rows
     ok   = [r for r in rows if r.get("confirmed")]
@@ -371,12 +463,13 @@ def _analyse():
         )
         _p(_T("step_done"))
         st.session_state.analysis_result=res
+        cc = _get_custom_colors()
         chart_bytes={
-            "cumulative_return_summary.png":    cm.mpl_cum_bar(res,L),
+            "cumulative_return_summary.png":    cm.mpl_cum_bar(res,L,custom=cc),
             "efficient_frontier.png":           cm.mpl_efficient_frontier(res,L),
-            "cumulative_return_timeseries.png": cm.mpl_cum_line(res,L),
-            "rolling_sharpe.png":               cm.mpl_rolling_sharpe(res,L),
-            "drawdown.png":                     cm.mpl_drawdown(res,L),
+            "cumulative_return_timeseries.png": cm.mpl_cum_line(res,L,custom=cc),
+            "rolling_sharpe.png":               cm.mpl_rolling_sharpe(res,L,custom=cc),
+            "drawdown.png":                     cm.mpl_drawdown(res,L,custom=cc),
         }
         st.session_state.chart_bytes=chart_bytes
         _autosave(res, L, chart_bytes)
@@ -426,8 +519,10 @@ def _results():
     st.download_button(_T("download_xlsx"),xlsx_b,"analysis_results.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="xl")
 
+    cc = _get_custom_colors()
+
     st.divider(); _sec("section_cum_bar","desc_cum_bar")
-    try: st.altair_chart(ca.chart_cum_bar(res,L),use_container_width=True)
+    try: st.altair_chart(ca.chart_cum_bar(res,L,custom_colors=cc),use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("cumulative_return_summary.png")
 
@@ -437,17 +532,17 @@ def _results():
     _dl("efficient_frontier.png")
 
     st.divider(); _sec("section_cum_line","desc_cum_line")
-    try: st.altair_chart(ca.chart_cum_line(res,L),use_container_width=True)
+    try: st.altair_chart(ca.chart_cum_line(res,L,custom_colors=cc),use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("cumulative_return_timeseries.png")
 
     st.divider(); _sec("section_rolling","desc_rolling")
-    try: st.altair_chart(ca.chart_rolling_sharpe(res,L),use_container_width=True)
+    try: st.altair_chart(ca.chart_rolling_sharpe(res,L,custom_colors=cc),use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("rolling_sharpe.png")
 
     st.divider(); _sec("section_drawdown","desc_drawdown")
-    try: st.altair_chart(ca.chart_drawdown(res,L),use_container_width=True)
+    try: st.altair_chart(ca.chart_drawdown(res,L,custom_colors=cc),use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("drawdown.png")
 
@@ -470,6 +565,7 @@ def main():
     _init(); _top_bar(); _basic(); _advanced()
     st.write(""); _symbols()
     _comparison_funds()
+    _chart_colors()
     st.write("")
     if _run_button():
         with st.spinner(""): _analyse()
