@@ -6,7 +6,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 # 依存パッケージ（キャッシュ活用のため先にコピー）
-COPY requirements.txt .
+COPY build/requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 
 # アプリ本体をコピー

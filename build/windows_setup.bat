@@ -9,8 +9,8 @@ REM ============================================
 set "VENV_DIR=.venv"
 set "UV_CMD=uv"
 
-REM Move to project root (2 levels up from build\windows)
-cd /d "%~dp0..\.."
+REM Move to project root (1 level up from build\)
+cd /d "%~dp0.."
 echo [setup] Project root: %cd%
 
 REM ============================================
@@ -188,16 +188,16 @@ REM ============================================
 echo.
 echo [5/6] Installing app dependencies...
 
-if not exist "requirements.txt" goto :no_requirements
+if not exist "build\requirements.txt" goto :no_requirements
 
-"!UV_CMD!" pip install -r requirements.txt
+"!UV_CMD!" pip install -r build\requirements.txt
 if errorlevel 1 goto :requirements_failed
 echo [setup] App dependencies installed.
 goto :step6
 
 :no_requirements
-echo [ERROR] requirements.txt not found in %cd%
-echo         Make sure this script is located in build\windows\
+echo [ERROR] build\requirements.txt not found in %cd%
+echo         Make sure this script is located in build\
 exit /b 1
 
 :requirements_failed

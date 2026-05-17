@@ -8,7 +8,7 @@ set -euo pipefail
 
 VENV_DIR="./.venv"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_ROOT"
 echo "[setup] Project root: $PROJECT_ROOT"
@@ -116,13 +116,13 @@ echo "[setup] venv activated."
 echo ""
 echo "[5/6] Installing app dependencies..."
 
-if [ ! -f "requirements.txt" ]; then
-    echo "[ERROR] requirements.txt not found in $PROJECT_ROOT"
-    echo "        Make sure this script is located in build/mac/"
+if [ ! -f "build/requirements.txt" ]; then
+    echo "[ERROR] build/requirements.txt not found in $PROJECT_ROOT"
+    echo "        Make sure this script is located in build/"
     exit 1
 fi
 
-if ! uv pip install -r requirements.txt; then
+if ! uv pip install -r build/requirements.txt; then
     echo "[ERROR] Failed to install dependencies from requirements.txt."
     echo "        Possible causes:"
     echo "          - No internet connection"
