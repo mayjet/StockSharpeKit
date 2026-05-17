@@ -11,7 +11,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from lang import get_text, _L
-from symbol_input_component import render_symbol_table, handle
+from symbol_input_component import render_symbol_table, handle_fund
 from analysis import run_analysis
 import charts_altair as ca
 import charts_mpl    as cm
@@ -20,12 +20,24 @@ from downloads import (
     build_output_json, build_zip,
 )
 from cloud_backup import upload_to_drive_async
+from charts_altair import DEFAULT_COLORS as _ALT_DEFAULTS, DEFAULT_STYLES as _ALT_STYLE_DEFAULTS
+from analysis import _load_benchmarks
 
 st.set_page_config(
     page_title="Max Sharpe Portfolio Analyzer for Stock League",
     page_icon="📈",
     layout="wide",
 )
+
+st.markdown("""<style>
+/* Tab panel border */
+[role="tabpanel"] {
+    border: 1px solid rgba(49, 51, 63, 0.16);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    padding: 1rem !important;
+}
+</style>""", unsafe_allow_html=True)
 
 BENCHMARKS_PATH = "benchmarks.json5"
 COUNTRY_OPTIONS = ["JP","US","GB","DE","FR","CN","HK","IN"]
@@ -55,6 +67,20 @@ def _T(k): return get_text(k, st.session_state.get("lang","JP"))
 def _labels(lang): return {**_L.get(lang,_L["JP"]), **_EXTRA.get(lang,_EXTRA["JP"])}
 
 
+# ── Fund helpers ──────────────────────────────────────────────────────────────
+
+def _new_fund(idx: int = 1) -> dict:
+    """Create a blank fund dict."""
+    return {
+        "id": id(object()),  # unique id
+        "name": f"{_T('fund_default_name')} {idx}",
+        "ticker_rows": [],
+        "_sym_last_seq": -9999,
+        "_sym_search_results": None,
+        "_dup_notice": [],
+    }
+
+
 def _init():
     today = date.today()
     _sd_default = today - timedelta(days=3 * 365)
@@ -63,11 +89,22 @@ def _init():
         start_date=_sd_default, end_date=today,
         risk_free_rate=0.0, min_weight=0.0,
         user_country="JP", mdd_threshold=-50, min_req_months=36,
-        ticker_rows=[], analysis_result=None, chart_bytes={},
-        _sym_last_seq=-9999, _sym_search_results=None,
+        analysis_result=None, chart_bytes={},
+        # Multi-fund state
+        funds=None,
+        # Chart color state
+        color_portfolio=_ALT_DEFAULTS["portfolio"],
+        color_bench=list(_ALT_DEFAULTS["benchmarks"]),
+        style_portfolio=_ALT_STYLE_DEFAULTS["portfolio"],
+        style_bench=list(_ALT_STYLE_DEFAULTS["benchmarks"]),
     ).items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+    # Initialize funds list with one default fund
+    if st.session_state.funds is None:
+        st.session_state.funds = [_new_fund(1)]
+
     # 旧セッションで start_date が None のまま残っている場合の救済
     if st.session_state.start_date is None:
         st.session_state.start_date = _sd_default
@@ -176,14 +213,11 @@ def _top_bar():
 
 
 
-def _basic():
-    st.markdown(_T("app_description"))
-    st.write("")
-    # ── ポートフォリオ名（全幅）──────────────────────────────────────────
-    st.session_state.portfolio_name = st.text_input(
-        _T("label_portfolio_name"), value=st.session_state.portfolio_name, key="pf"
+def _period():
+    st.markdown(
+        f"<h3>{_T('section_period_settings')}</h3>",
+        unsafe_allow_html=True,
     )
-    # ── 分析期間（2カラム：date_input + iOS 自動変換防止 JS）────────────
     today = date.today()
     c1, c2 = st.columns(2)
     with c1:
@@ -203,6 +237,7 @@ def _basic():
         )
         st.session_state.end_date = ed
     _inject_date_js()
+    _advanced()
 
 
 def _advanced():
@@ -241,54 +276,213 @@ def _advanced():
             st.caption(_T("desc_min_months"))
 
 
-def _symbols():
-    st.subheader(_T("section_symbols"))
-    st.caption(_T("sym_table_hint"))
+# ── Multi-fund vertical tabs ────────────────────────────────────────────────
 
-    lang    = st.session_state.lang
-    country = st.session_state.user_country
+_FUND_COLORS = ["#2563EB", "#E74C3C", "#16A085", "#8E44AD",
+                "#F39C12", "#1ABC9C", "#E67E22", "#3498DB"]
 
-    cv = render_symbol_table(
-        rows           = st.session_state.ticker_rows,
-        lang           = lang,
-        country        = country,
-        labels         = _labels(lang),
-        search_results = st.session_state.get("_sym_search_results"),
-        key            = "sym_table",
-    )
 
-    action = handle(cv)
+def _fund_tabs():
+    """Render the multi-fund tab interface using st.tabs()."""
+    funds = st.session_state.funds
 
-    if action == "new_results":
-        st.rerun()                   # push results to component
+    st.subheader(_T("section_funds"))
 
-    if action == "rows_update":
-        st.session_state._sym_search_results = None
+    # "＋ Add" button above tabs
+    if st.button(_T("btn_add_fund"), key="add_fund"):
+        funds.append(_new_fund(len(funds) + 1))
+        st.rerun()
 
-    # Duplicate toast
-    dupes = st.session_state.pop("_dup_notice", [])
-    if dupes:
-        st.toast(
-            f"⚠️ {', '.join(dupes)} — {_T('msg_duplicate')}",
-            icon="⚠️",
-        )
+    if not funds:
+        st.info(_T("fund_tab_empty"))
+        return
+
+    # Tab labels must be 100% STABLE across reruns — st.tabs() resets
+    # to the first tab whenever ANY label string changes.
+    # Use fixed index-based labels; the user-chosen name is shown inside.
+    tab_labels = [f"{_T('fund_default_name')} {i+1}" for i in range(len(funds))]
+
+    # Append fixed benchmark tabs
+    bench_names = _bench_names()
+    bench_colors = st.session_state.color_bench
+    bench_styles = st.session_state.style_bench
+    n_funds = len(funds)
+    for bn in bench_names:
+        tab_labels.append(f"📊 {bn}")
+
+    tabs = st.tabs(tab_labels)
+
+    # ── Fund tabs ─────────────────────────────────────────────────────────
+    for i in range(n_funds):
+        with tabs[i]:
+            fund = funds[i]
+
+            # Fund name — widget key is the source of truth.
+            # Sync to fund dict only via the key read, never triggering a
+            # label-changing rerun.
+            _fname_key = f"fund_name_{i}"
+            st.text_input(
+                _T("fund_name_label"),
+                value=fund["name"],
+                placeholder=_T("fund_name_placeholder"),
+                key=_fname_key,
+            )
+            # Always keep fund dict in sync (labels don't use this value)
+            fund["name"] = st.session_state.get(_fname_key, fund["name"])
+
+            # Chart style (color + line style) in expander
+            c_key = f"_cp_fund_{i}"
+            s_key = f"_sel_fund_style_{i}"
+            c_default = _FUND_COLORS[i % len(_FUND_COLORS)]
+            c_val = st.session_state.get(c_key, c_default)
+            s_val = st.session_state.get(s_key, "solid")
+
+            with st.expander(_T("section_chart_colors"), expanded=False):
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    st.color_picker(_T("fund_chart_style_label"),
+                                    value=c_val, key=c_key)
+                with sc2:
+                    st.selectbox(_T("fund_line_style_label"), _STYLE_KEYS,
+                                 key=s_key,
+                                 index=_STYLE_KEYS.index(s_val) if s_val in _STYLE_KEYS else 0,
+                                 format_func=lambda k: _T(f"style_{k}"))
+
+            # Symbol table
+            st.caption(_T("sym_table_hint"))
+            lang    = st.session_state.lang
+            country = st.session_state.user_country
+
+            cv = render_symbol_table(
+                rows           = fund.get("ticker_rows", []),
+                lang           = lang,
+                country        = country,
+                labels         = _labels(lang),
+                search_results = fund.get("_sym_search_results"),
+                key            = f"sym_fund_{i}",
+            )
+
+            action = handle_fund(cv, fund)
+            if action == "new_results":
+                st.rerun()
+            if action == "rows_update":
+                fund["_sym_search_results"] = None
+
+            dupes = fund.pop("_dup_notice", []) if isinstance(fund.get("_dup_notice"), list) else []
+            if dupes:
+                st.toast(f"⚠️ {', '.join(dupes)} — {_T('msg_duplicate')}", icon="⚠️")
+
+            # Delete button (only if more than one fund)
+            if len(funds) > 1:
+                st.divider()
+                if st.button(_T("btn_del_fund"), key=f"fund_del_{i}", type="secondary"):
+                    funds.pop(i)
+                    st.rerun()
+
+    # ── Benchmark tabs (fixed, style-only) ────────────────────────────────
+    _BENCH_STYLE_DEFAULTS = ["dashed", "dotted", "dashdot", "solid", "dashed"]
+    for bi, bn in enumerate(bench_names):
+        with tabs[n_funds + bi]:
+            c_key = f"_cp_bench_{bi}"
+            s_key = f"_sel_bench_style_{bi}"
+            c_val = bench_colors[bi] if bi < len(bench_colors) else "#9CA3AF"
+            s_val = bench_styles[bi] if bi < len(bench_styles) else _BENCH_STYLE_DEFAULTS[bi % len(_BENCH_STYLE_DEFAULTS)]
+
+            with st.expander(_T("section_chart_colors"), expanded=True):
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    new_c = st.color_picker(_T("fund_chart_style_label"),
+                                            value=c_val, key=c_key)
+                with sc2:
+                    new_s = st.selectbox(_T("fund_line_style_label"), _STYLE_KEYS,
+                                         key=s_key,
+                                         index=_STYLE_KEYS.index(s_val) if s_val in _STYLE_KEYS else 0,
+                                         format_func=lambda k: _T(f"style_{k}"))
+
+            # Sync back to session state lists
+            if bi < len(bench_colors):
+                bench_colors[bi] = new_c
+            if bi < len(bench_styles):
+                bench_styles[bi] = new_s
+            else:
+                bench_styles.append(new_s)
+
+    st.session_state.color_bench = bench_colors
+    st.session_state.style_bench = bench_styles
+
+
+def _bench_names() -> list[str]:
+    """Return display names for index benchmarks."""
+    try:
+        _, defs, _ = _load_benchmarks(BENCHMARKS_PATH, st.session_state.user_country)
+        names = [b["name"] for b in defs]
+    except Exception:
+        names = []
+    return names
+
+
+_STYLE_KEYS = ["solid", "dashed", "dotted", "dashdot"]
+
+
+
+
+def _get_custom_colors() -> dict:
+    _FUND_COLORS_DEFAULT = ["#2563EB", "#E74C3C", "#16A085", "#8E44AD",
+                            "#F39C12", "#1ABC9C", "#E67E22", "#3498DB"]
+    funds = st.session_state.funds
+    fund_colors = []
+    fund_styles = []
+    for i in range(len(funds)):
+        fund_colors.append(st.session_state.get(
+            f"_cp_fund_{i}", _FUND_COLORS_DEFAULT[i % len(_FUND_COLORS_DEFAULT)]))
+        fund_styles.append(st.session_state.get(f"_sel_fund_style_{i}", "solid"))
+    return {
+        "fund_colors": fund_colors,
+        "fund_styles": fund_styles,
+        "benchmarks": list(st.session_state.color_bench),
+        "bench_styles": list(st.session_state.style_bench),
+        # Legacy single-fund compat
+        "portfolio": fund_colors[0] if fund_colors else "#2563EB",
+        "portfolio_style": fund_styles[0] if fund_styles else "solid",
+    }
 
 
 def _run_button():
-    rows = st.session_state.ticker_rows
-    ok   = [r for r in rows if r.get("confirmed")]
-    bad  = [r for r in rows if not r.get("confirmed")
-            and not r.get("duplicate") and r.get("symbol","").strip()]
+    funds = st.session_state.funds
+    all_ok = []
+    bad_funds = []
+    has_bad_rows = False
+
+    for i, fund in enumerate(funds):
+        rows = fund.get("ticker_rows", [])
+        ok   = [r for r in rows if r.get("confirmed")]
+        bad  = [r for r in rows if not r.get("confirmed")
+                and not r.get("duplicate") and r.get("symbol", "").strip()]
+        if ok:
+            all_ok.extend(ok)
+        else:
+            bad_funds.append(fund["name"] or f"{_T('fund_default_name')} {i+1}")
+        if bad:
+            has_bad_rows = True
+
     bad_order = (
         st.session_state.start_date is not None
         and st.session_state.start_date >= st.session_state.end_date
     )
     st.write("")
-    if not ok:      st.info(_T("warn_no_confirmed"))
-    elif bad:       st.warning(_T("warn_has_unconfirmed"))
-    if bad_order:   st.warning(_T("warn_date_order"))
-    blocked = not ok or bool(bad) or bad_order
-    return st.button(_T("btn_run"),type="primary", disabled=blocked, key="run")
+    if not funds:
+        st.info(_T("warn_no_funds"))
+    elif not all_ok:
+        st.info(_T("warn_no_confirmed"))
+    elif bad_funds:
+        st.warning(_T("warn_fund_no_confirmed").format(names=", ".join(bad_funds)))
+    if has_bad_rows:
+        st.warning(_T("warn_has_unconfirmed"))
+    if bad_order:
+        st.warning(_T("warn_date_order"))
+
+    blocked = not all_ok or has_bad_rows or bad_order or bool(bad_funds)
+    return st.button(_T("btn_run"), type="primary", disabled=blocked, key="run")
 
 
 def _autosave(res, L: dict, chart_bytes: dict) -> None:
@@ -297,7 +491,7 @@ def _autosave(res, L: dict, chart_bytes: dict) -> None:
     out_dir = Path("portfolios") / f"{res.portfolio_name}_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "analysis_results.xlsx").write_bytes(build_analysis_xlsx(res, L))
-    (out_dir / "resolved_symbols.xlsx").write_bytes(build_resolved_xlsx(res.confirmed_df))
+    (out_dir / "resolved_symbols.xlsx").write_bytes(build_resolved_xlsx(res))
     (out_dir / "output.json").write_bytes(build_output_json(res, L))
     for fname, data in chart_bytes.items():
         if data:
@@ -306,39 +500,58 @@ def _autosave(res, L: dict, chart_bytes: dict) -> None:
 
 
 def _analyse():
-    L   = _L[st.session_state.lang]
-    cdf = pd.DataFrame([
-        dict(input=r["symbol"],symbol=r["symbol"],name=r.get("name",""),
-             exchange=r.get("exchange",""),country=r.get("country",""))
-        for r in st.session_state.ticker_rows if r.get("confirmed")
-    ])
-    msgs=[]; ph=st.empty()
+    L     = _L[st.session_state.lang]
+    funds = st.session_state.funds
+
+    # Build multi_funds input for analysis
+    multi_funds = []
+    for fund in funds:
+        confirmed = [r for r in fund.get("ticker_rows", []) if r.get("confirmed")]
+        if not confirmed:
+            continue
+        cdf = pd.DataFrame([
+            dict(input=r["symbol"], symbol=r["symbol"], name=r.get("name", ""),
+                 exchange=r.get("exchange", ""), country=r.get("country", ""))
+            for r in confirmed
+        ])
+        multi_funds.append({
+            "name": fund["name"] or f"Fund {len(multi_funds)+1}",
+            "confirmed_df": cdf,
+        })
+
+    msgs = []; ph = st.empty()
     def _p(m): msgs.append(m); ph.info("  \n".join(msgs))
     try:
-        res=run_analysis(
-            confirmed_df    = cdf,
+        res = run_analysis(
+            confirmed_df    = multi_funds[0]["confirmed_df"],  # legacy param
             portfolio_name  = st.session_state.portfolio_name,
             start_date      = str(st.session_state.start_date),
             end_date        = str(st.session_state.end_date),
             risk_free_rate  = float(st.session_state.risk_free_rate) / 100,
             min_weight      = float(st.session_state.min_weight) / 100,
             user_country    = st.session_state.user_country,
-            mdd_threshold   = float(st.session_state.mdd_threshold)/100,
+            mdd_threshold   = float(st.session_state.mdd_threshold) / 100,
             min_req_months  = int(st.session_state.min_req_months),
             benchmarks_path = BENCHMARKS_PATH,
             lang_dict       = L,
             progress_cb     = _p,
+            multi_funds     = multi_funds,
         )
         _p(_T("step_done"))
-        st.session_state.analysis_result=res
-        chart_bytes={
-            "cumulative_return_summary.png":    cm.mpl_cum_bar(res,L),
-            "efficient_frontier.png":           cm.mpl_efficient_frontier(res,L),
-            "cumulative_return_timeseries.png": cm.mpl_cum_line(res,L),
-            "rolling_sharpe.png":               cm.mpl_rolling_sharpe(res,L),
-            "drawdown.png":                     cm.mpl_drawdown(res,L),
+        st.session_state.analysis_result = res
+        cc = _get_custom_colors()
+        chart_bytes = {
+            "cumulative_return_summary.png":    cm.mpl_cum_bar(res, L, custom=cc),
+            "cumulative_return_timeseries.png": cm.mpl_cum_line(res, L, custom=cc),
+            "rolling_sharpe.png":               cm.mpl_rolling_sharpe(res, L, custom=cc),
+            "drawdown.png":                     cm.mpl_drawdown(res, L, custom=cc),
         }
-        st.session_state.chart_bytes=chart_bytes
+        # Per-fund efficient frontier charts
+        for fi, fr in enumerate(res.funds):
+            suffix = f"_{fr.fund_name}" if len(res.funds) > 1 else ""
+            chart_bytes[f"efficient_frontier{suffix}.png"] = \
+                cm.mpl_efficient_frontier(res, L, fund_idx=fi)
+        st.session_state.chart_bytes = chart_bytes
         _autosave(res, L, chart_bytes)
     except Exception as e:
         ph.error(f"{_T('analysis_error')}: {e}"); raise
@@ -346,25 +559,38 @@ def _analyse():
         ph.empty()
 
 
-def _sec(t,d): st.subheader(_T(t)); st.markdown(_T(d))
+def _sec(t, d): st.subheader(_T(t)); st.markdown(_T(d))
 def _dl(f):
-    d=st.session_state.chart_bytes.get(f,b"")
-    if d: st.download_button(_T("btn_download_png"),d,f,"image/png",key=f"dl_{f}")
+    d = st.session_state.chart_bytes.get(f, b"")
+    if d: st.download_button(_T("btn_download_png"), d, f, "image/png", key=f"dl_{f}")
 
 def _results():
-    res=st.session_state.analysis_result
+    res = st.session_state.analysis_result
     if res is None: return
-    L=_L[st.session_state.lang]
+    L = _L[st.session_state.lang]
     st.divider()
 
-    _sec("section_weights","desc_weights")
-    c1,c2=st.columns([1.2,1])
-    with c1: st.dataframe(res.weights_df,use_container_width=True,hide_index=True)
-    with c2:
-        try: st.altair_chart(ca.chart_weights(res,L),use_container_width=True)
-        except Exception as e: st.warning(str(e))
+    # ── Per-fund weights ─────────────────────────────────────────────────
+    _sec("section_weights", "desc_weights")
+    if len(res.funds) == 1:
+        # Single fund: same layout as before
+        c1, c2 = st.columns([1.2, 1])
+        with c1: st.dataframe(res.funds[0].weights_df, use_container_width=True, hide_index=True)
+        with c2:
+            try: st.altair_chart(ca.chart_weights(res, L, fund_idx=0), use_container_width=True)
+            except Exception as e: st.warning(str(e))
+    else:
+        # Multiple funds: tabbed view
+        fund_tabs = st.tabs([fr.fund_name for fr in res.funds])
+        for fi, tab in enumerate(fund_tabs):
+            with tab:
+                c1, c2 = st.columns([1.2, 1])
+                with c1: st.dataframe(res.funds[fi].weights_df, use_container_width=True, hide_index=True)
+                with c2:
+                    try: st.altair_chart(ca.chart_weights(res, L, fund_idx=fi), use_container_width=True)
+                    except Exception as e: st.warning(str(e))
 
-    st.divider(); _sec("section_performance","desc_performance")
+    st.divider(); _sec("section_performance", "desc_performance")
     _pct = st.column_config.NumberColumn(format="percent")
     _num = st.column_config.NumberColumn(format="%.3f")
     st.dataframe(
@@ -382,58 +608,73 @@ def _results():
             L["col_ir"]:         _num,
         },
     )
-    xlsx_b=build_analysis_xlsx(res,L); res_b=build_resolved_xlsx(res.confirmed_df)
-    st.download_button(_T("download_xlsx"),xlsx_b,"analysis_results.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="xl")
+    xlsx_b = build_analysis_xlsx(res, L)
+    res_b  = build_resolved_xlsx(res)
+    st.download_button(_T("download_xlsx"), xlsx_b, "analysis_results.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="xl")
 
-    st.divider(); _sec("section_cum_bar","desc_cum_bar")
-    try: st.altair_chart(ca.chart_cum_bar(res,L),use_container_width=True)
+    cc = _get_custom_colors()
+
+    st.divider(); _sec("section_cum_bar", "desc_cum_bar")
+    try: st.altair_chart(ca.chart_cum_bar(res, L, custom_colors=cc), use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("cumulative_return_summary.png")
 
-    st.divider(); _sec("section_frontier","desc_frontier")
-    try: st.altair_chart(ca.chart_efficient_frontier(res,L),use_container_width=True)
-    except Exception as e: st.warning(str(e))
-    _dl("efficient_frontier.png")
+    # ── Efficient frontier (per-fund) ─────────────────────────────────────
+    st.divider(); _sec("section_frontier", "desc_frontier")
+    if len(res.funds) == 1:
+        try: st.altair_chart(ca.chart_efficient_frontier(res, L, fund_idx=0), use_container_width=True)
+        except Exception as e: st.warning(str(e))
+        _dl("efficient_frontier.png")
+    else:
+        ef_tabs = st.tabs([fr.fund_name for fr in res.funds])
+        for fi, tab in enumerate(ef_tabs):
+            with tab:
+                try: st.altair_chart(ca.chart_efficient_frontier(res, L, fund_idx=fi), use_container_width=True)
+                except Exception as e: st.warning(str(e))
+                _dl(f"efficient_frontier_{res.funds[fi].fund_name}.png")
 
-    st.divider(); _sec("section_cum_line","desc_cum_line")
-    try: st.altair_chart(ca.chart_cum_line(res,L),use_container_width=True)
+    st.divider(); _sec("section_cum_line", "desc_cum_line")
+    try: st.altair_chart(ca.chart_cum_line(res, L, custom_colors=cc), use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("cumulative_return_timeseries.png")
 
-    st.divider(); _sec("section_rolling","desc_rolling")
-    try: st.altair_chart(ca.chart_rolling_sharpe(res,L),use_container_width=True)
+    st.divider(); _sec("section_rolling", "desc_rolling")
+    try: st.altair_chart(ca.chart_rolling_sharpe(res, L, custom_colors=cc), use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("rolling_sharpe.png")
 
-    st.divider(); _sec("section_drawdown","desc_drawdown")
-    try: st.altair_chart(ca.chart_drawdown(res,L),use_container_width=True)
+    st.divider(); _sec("section_drawdown", "desc_drawdown")
+    try: st.altair_chart(ca.chart_drawdown(res, L, custom_colors=cc), use_container_width=True)
     except Exception as e: st.warning(str(e))
     _dl("drawdown.png")
 
     st.divider(); st.subheader(_T("btn_download_all"))
-    json_b=build_output_json(res,L)
-    zip_b=build_zip(xlsx_bytes=xlsx_b,resolved_bytes=res_b,
-                    json_bytes=json_b,chart_bytes=st.session_state.chart_bytes)
+    json_b = build_output_json(res, L)
+    zip_b  = build_zip(xlsx_bytes=xlsx_b, resolved_bytes=res_b,
+                       json_bytes=json_b, chart_bytes=st.session_state.chart_bytes)
     _ts = res.timestamp.replace("-", ".").replace(" ", "_").replace(":", ".")
     _zip_name = f"{res.portfolio_name}_{_ts}.zip"
-    cz,cj,cr=st.columns(3)
-    cz.download_button(_T("btn_download_all"),zip_b,
-        _zip_name,"application/zip",key="zip")
-    cj.download_button(_T("download_json"),json_b,"output.json",
-        "application/json",key="json_dl")
-    cr.download_button(_T("download_resolved"),res_b,"resolved_symbols.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="res_dl")
+    cz, cj, cr = st.columns(3)
+    cz.download_button(_T("btn_download_all"), zip_b,
+        _zip_name, "application/zip", key="zip")
+    cj.download_button(_T("download_json"), json_b, "output.json",
+        "application/json", key="json_dl")
+    cr.download_button(_T("download_resolved"), res_b, "resolved_symbols.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="res_dl")
 
 
 def main():
-    _init(); _top_bar(); _basic(); _advanced()
-    st.write(""); _symbols()
+    _init(); _top_bar()
+    st.markdown(_T("app_description"))
+    st.write("")
+    _period()
+    _fund_tabs()
     st.write("")
     if _run_button():
         with st.spinner(""): _analyse()
         st.rerun()
     _results()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

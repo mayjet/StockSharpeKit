@@ -2,12 +2,12 @@
 
 
 <p align="center">
-  <a href="https://maysak-mayjet-stocksharpekit.streamlit.app/">
+  <a href="https://kurata.streamlit.app/">
     <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg">
   </a>
 </p>
 
-## Demo : [アプリを開く](https://maysak-mayjet-stocksharpekit.streamlit.app/)
+## Demo : [アプリを開く](https://kurata.streamlit.app/)
 
 
 現代ポートフォリオ理論（MPT）に基づき、**シャープレシオを最大化する最適な資産配分**を求める株式ポートフォリオ分析ツールです。
@@ -46,11 +46,53 @@
 
 ## インストール
 
+### Mac / Ubuntu
+
 ```bash
 git clone https://github.com/mayjet/StockSharpeKit.git
 cd StockSharpeKit
-pip install -r requirements.txt
+bash build/setup.sh
 ```
+
+セットアップ完了後（仮想環境を有効化してアプリを起動）:
+
+```bash
+source .venv/bin/activate
+streamlit run app.py
+```
+
+> `uv` が未インストールの場合、スクリプトが自動でインストールします（Homebrew → curl の順で試行）。
+
+---
+
+### Windows
+
+```bat
+git clone https://github.com/mayjet/StockSharpeKit.git
+cd StockSharpeKit
+build\windows_setup.bat
+```
+
+セットアップ完了後:
+
+```bat
+.venv\Scripts\activate.bat
+streamlit run app.py
+```
+
+> `uv` が未インストールの場合、スクリプトが pip 経由で自動インストールします。
+
+---
+
+### Docker
+
+```bash
+git clone https://github.com/mayjet/StockSharpeKit.git
+cd StockSharpeKit
+docker compose -f build/docker-compose.yml up
+```
+
+起動後、ブラウザで http://localhost:8501 を開く。
 
 ---
 
