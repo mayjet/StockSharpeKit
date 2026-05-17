@@ -23,3 +23,5 @@ get_gdrive_token.py
 
 # 個人ファイル
 *.pdf
+
+.agent-interface/
