@@ -24,7 +24,7 @@ from charts_altair import DEFAULT_COLORS as _ALT_DEFAULTS, DEFAULT_STYLES as _AL
 from analysis import _load_benchmarks
 
 st.set_page_config(
-    page_title="Max Sharpe Portfolio Analyzer for Stock League",
+    page_title="Kurata Stock Tools",
     page_icon="📈",
     layout="wide",
 )
@@ -193,7 +193,7 @@ def _inject_date_js():
 
 def _top_bar():
     c1, c2 = st.columns([6, 1])
-    c1.markdown("## 📈 Max Sharpe Portfolio Analyzer for Stock League")
+    c1.markdown("## 📈 Kurata Stock Tools")
     with c2:
         _opts   = ["JP", "EN"]
         _labels = {"JP": "日本語", "EN": "English"}
@@ -288,12 +288,18 @@ def _fund_tabs():
 
     st.subheader(_T("section_funds"))
 
-    # "＋ Add" button above tabs
-    if st.button(_T("btn_add_fund"), key="add_fund"):
-        funds.append(_new_fund(len(funds) + 1))
-        st.rerun()
-
     if not funds:
+        # No tabs yet — show the add button on its own (right-aligned).
+        _, col_add_empty = st.columns([10, 1])
+        with col_add_empty:
+            if st.button(
+                "＋",
+                key="add_fund",
+                help=_T("btn_add_fund"),
+                use_container_width=True,
+            ):
+                funds.append(_new_fund(len(funds) + 1))
+                st.rerun()
         st.info(_T("fund_tab_empty"))
         return
 
@@ -309,6 +315,56 @@ def _fund_tabs():
     n_funds = len(funds)
     for bn in bench_names:
         tab_labels.append(f"📊 {bn}")
+
+    # CSS overlay: right-align the "+" button on the tab bar.
+    # Approach:
+    #   1. Hide style-only stMarkdown containers — they would otherwise add a
+    #      phantom 1rem flex gap between h3 and the button.
+    #   2. Use align-self/margin-left auto to right-align the button container
+    #      within the flex column (`float` doesn't work on flex items).
+    #   3. Negative margin-bottom pulls the tab bar up to overlay the button.
+    st.markdown(
+        """
+        <style>
+        /* Eliminate the flex gap contribution of style-only markdown blocks.
+           Note: ":only-child" can't be used because indentation whitespace in
+           the Python string creates text nodes around the <style> tag — the
+           style is not the sole child. Use descendant selector instead. */
+        [data-testid="stElementContainer"]:has([data-testid="stMarkdown"] style) {
+            display: none !important;
+        }
+
+        /* Right-align "+" button overlaid on tab bar */
+        .st-key-add_fund {
+            align-self: flex-end !important;
+            margin-left: auto !important;
+            margin-right: 0.5rem !important;
+            margin-top: 0 !important;
+            margin-bottom: -3rem !important;
+            width: fit-content !important;
+            max-width: fit-content !important;
+            padding: 0 !important;
+            position: relative;
+            z-index: 10;
+        }
+        .st-key-add_fund button {
+            min-height: 38px;
+            padding: 0 0.75rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        /* Reserve right space so tabs don't slip under "+" */
+        [data-baseweb="tab-list"] {
+            padding-right: 4rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("＋", key="add_fund", help=_T("btn_add_fund")):
+        funds.append(_new_fund(len(funds) + 1))
+        st.rerun()
 
     tabs = st.tabs(tab_labels)
 
