@@ -45,6 +45,10 @@ else
     if command -v brew &> /dev/null; then
         echo "[setup] Installing uv via Homebrew..."
         brew install uv
+    elif command -v curl &> /dev/null; then
+        echo "[setup] Installing uv via official installer (curl)..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        export PATH="$HOME/.local/bin:$PATH"
     elif command -v pip3 &> /dev/null; then
         echo "[setup] Installing uv via pip3..."
         pip3 install uv
@@ -60,7 +64,7 @@ else
     # Verify installation
     if ! command -v uv &> /dev/null; then
         echo "[ERROR] uv was installed but cannot be found in PATH."
-        echo "        Close this terminal, open a new one, and try again."
+        echo "        Try: source ~/.local/bin/env  or open a new terminal."
         exit 1
     fi
     echo "[setup] uv installed."
