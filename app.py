@@ -214,26 +214,30 @@ def _top_bar():
 
 
 def _period():
-    with st.expander(_T("section_period"), expanded=False):
-        today = date.today()
-        c1, c2 = st.columns(2)
-        with c1:
-            sd = st.date_input(
-                _T("label_start_date"),
-                value=st.session_state.start_date,
-                max_value=today,
-                key="sd_cal",
-            )
-            st.session_state.start_date = sd
-        with c2:
-            ed = st.date_input(
-                _T("label_end_date"),
-                value=min(st.session_state.end_date, today),
-                max_value=today,
-                key="ed_cal",
-            )
-            st.session_state.end_date = ed
-        _inject_date_js()
+    st.markdown(
+        f"<h3>{_T('section_period_settings')}</h3>",
+        unsafe_allow_html=True,
+    )
+    today = date.today()
+    c1, c2 = st.columns(2)
+    with c1:
+        sd = st.date_input(
+            _T("label_start_date"),
+            value=st.session_state.start_date,
+            max_value=today,
+            key="sd_cal",
+        )
+        st.session_state.start_date = sd
+    with c2:
+        ed = st.date_input(
+            _T("label_end_date"),
+            value=min(st.session_state.end_date, today),
+            max_value=today,
+            key="ed_cal",
+        )
+        st.session_state.end_date = ed
+    _inject_date_js()
+    _advanced()
 
 
 def _advanced():
@@ -664,9 +668,8 @@ def main():
     _init(); _top_bar()
     st.markdown(_T("app_description"))
     st.write("")
-    _fund_tabs()
     _period()
-    _advanced()
+    _fund_tabs()
     st.write("")
     if _run_button():
         with st.spinner(""): _analyse()
